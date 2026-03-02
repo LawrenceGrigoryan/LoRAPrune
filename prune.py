@@ -25,7 +25,7 @@ def train(
     data_path: str = "",  # the required argument
     output_dir: str = "output_dir",
     # training hyperparams
-    nsamples: int = 25000,
+    train_set_size: int = 25000,
     batch_size: int = 128,
     micro_batch_size: int = 4,
     num_epochs: int = 3,
@@ -59,6 +59,7 @@ def train(
     wandb_watch: str = "",  # options: false | gradients | all
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
+    fp16: bool = True,  # whether to use mixed precision training
 ):
     print(
         f"Pruning with params:\n"
@@ -70,6 +71,7 @@ def train(
         f"num_epochs: {num_epochs}\n"
         f"learning_rate: {learning_rate}\n"
         f"cutoff_len: {cutoff_len}\n"
+        f"train_set_size: {train_set_size}\n"
         f"val_set_size: {val_set_size}\n"
         f"lora_r: {lora_r}\n"
         f"lora_alpha: {lora_alpha}\n"
@@ -209,7 +211,7 @@ def train(
 
     if val_set_size > 0:
         train_val = data["train"].train_test_split(
-            test_size=val_set_size, shuffle=True, seed=42
+            train_size=train_set_size, test_size=val_set_size, shuffle=True, seed=42
         )
         train_data = (
             train_val["train"].shuffle().map(generate_and_tokenize_prompt)
@@ -232,7 +234,7 @@ def train(
             warmup_steps=0,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
-            fp16=True,
+            fp16=fp16,
             logging_steps=10,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
