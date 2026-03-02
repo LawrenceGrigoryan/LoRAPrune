@@ -1,3 +1,4 @@
+# pip install torch==2.5.1+cu124 --index-url https://download.pytorch.org/whl/cu124
 accelerate==1.1.1
 appdirs==1.4.4
 bitsandbytes==0.44.1
@@ -7,7 +8,7 @@ fire==0.7.0
 peft==0.13.2
 transformers==4.46.3
 sentencepiece==0.2.0
-torch==2.5.1+cu124
+# torch==2.5.1+cu124
 gradio==5.8.0
 lm-format-enforcer==0.10.9
 protobuf==5.29.1
