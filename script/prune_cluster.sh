@@ -7,14 +7,15 @@
 #SBATCH --gres=gpu:1
 
 srun python prune.py \
-    --base_model "meta-llama/Llama-3.2-1B" \
-    --data_path 'MBZUAI/LaMini-instruction' \
+    --base_model "./models/meta-llama_Llama-3.2-1B" \
+    --data_path './data/MBZUAI_LaMini-instruction' \
     --output_dir 'outputs_dir' \
     --batch_size 16 \
     --micro_batch_size 2 \
     --num_epochs 2 \
     --learning_rate 1e-4 \
     --cutoff_len 512 \
+    --train_set_size 10000 \
     --val_set_size 1000 \
     --lora_r 8 \
     --lora_alpha 16 \
