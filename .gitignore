@@ -1,6 +1,7 @@
 # local
 data
 models
+outputs_dir
 
 # Python bytecode
 __pycache__/

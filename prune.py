@@ -9,6 +9,7 @@ from datasets import load_dataset
 from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze
 from loraprune.lora import LoraConfig
+from loguru import logger
 
 from peft import (
     prepare_model_for_kbit_training,
@@ -79,6 +80,7 @@ def train(
         f"lora_target_modules: {lora_target_modules}\n"
         f"train_on_inputs: {train_on_inputs}\n"
         f"group_by_length: {group_by_length}\n"
+        f"load_in_8bit: {load_in_8bit}\n"
         f"wandb_project: {wandb_project}\n"
         f"wandb_run_name: {wandb_run_name}\n"
         f"wandb_watch: {wandb_watch}\n"
@@ -116,6 +118,28 @@ def train(
         torch_dtype=torch.bfloat16,
         device_map=device_map,
     )
+    
+    if torch.cuda.is_available():
+        device_id = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device_id)
+
+        total_memory = props.total_memory / (1024**3)  # Convert to GB
+        allocated = torch.cuda.memory_allocated(device_id) / (1024**3)
+        reserved = torch.cuda.memory_reserved(device_id) / (1024**3)
+
+        logger.info(f"GPU: {props.name}")
+        logger.info(f"Total memory: {total_memory:.2f} GB")
+        logger.info(f"Allocated memory: {allocated:.2f} GB")
+        logger.info(f"Reserved memory: {reserved:.2f} GB")
+        
+        count = torch.cuda.device_count()
+        logger.info(f"Number of CUDA devices: {count}")
+
+        for i in range(count):
+            props = torch.cuda.get_device_properties(i)
+            logger.info(f"Device {i}: {props.name}")
+            logger.info(f"  Total memory: {props.total_memory / (1024**3):.2f} GB")
+            logger.info(f"  Compute capability: {props.major}.{props.minor}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
@@ -230,7 +254,7 @@ def train(
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             per_device_eval_batch_size=micro_batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
+            gradient_accumulation_steps=8,
             warmup_steps=0,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
