@@ -2,6 +2,7 @@
 data
 models
 outputs_dir
+notebooks
 
 # Python bytecode
 __pycache__/

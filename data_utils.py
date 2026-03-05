@@ -7,7 +7,7 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
     result = tokenizer(
         prompt,
         truncation=True,
-        max_length=cutoff_len,
+        max_length=cutoff_len-1,  # reserve space for EOS token
         padding=False,
         return_tensors=None,
     )
