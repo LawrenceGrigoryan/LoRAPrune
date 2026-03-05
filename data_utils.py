@@ -24,7 +24,7 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
     return result
 
 
-def generate_prompt(data_point):
+def generate_sft_sample(data_point):
     return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -35,10 +35,10 @@ def generate_prompt(data_point):
 
 
 def generate_and_tokenize_prompt(data_point: dict, train_on_inputs: bool):
-    full_prompt = generate_prompt(data_point)
+    full_prompt = data_point["text"]
     tokenized_full_prompt = tokenize(full_prompt)
     if not train_on_inputs:
-        user_prompt = generate_prompt({**data_point, "response": ""})
+        user_prompt = generate_sft_sample({**data_point, "response": ""})
         tokenized_user_prompt = tokenize(user_prompt, add_eos_token=False)
         user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
