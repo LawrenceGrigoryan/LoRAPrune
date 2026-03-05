@@ -5,6 +5,7 @@ from typing import List
 import fire
 import torch
 import transformers
+from transformers import DataCollatorForSeq2Seq
 from datasets import load_dataset
 from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze
@@ -144,9 +145,8 @@ def train(
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
-    tokenizer.pad_token_id = (
-        0  # unk. we want this to be different from the eos token
-    )
+    # FIXME: switch to sequence packing
+    tokenizer.add_special_tokens({"pad_token": "<pad>"})  # unk. we want this to be different from the eos token
     tokenizer.padding_side = "left"  # Allow batched inference
 
     if load_in_8bit:
@@ -238,10 +238,10 @@ def train(
             run_name=wandb_run_name if use_wandb else None,
             max_grad_norm=1.0,  # avoid exploding grads
         ),
-        data_collator=transformers.DataCollatorForSeq2Seq(
+        # we already created labels, so this collator is just for padding - no need to worry about ignoring pad tokens
+        data_collator=DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
         ),
-        # data_collator=data_collator,
         ratio=ratio,
         init_ratio=init_ratio,
         warmup_iters=warmup_iters,

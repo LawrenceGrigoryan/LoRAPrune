@@ -42,6 +42,7 @@ def generate_and_tokenize_prompt(data_point: dict, train_on_inputs: bool):
         tokenized_user_prompt = tokenize(user_prompt, add_eos_token=False)
         user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
+        # models internally perform the label shift
         tokenized_full_prompt["labels"] = [
             -100
         ] * user_prompt_len + tokenized_full_prompt["labels"][
