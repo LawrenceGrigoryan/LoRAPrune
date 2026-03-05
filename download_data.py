@@ -1,3 +1,8 @@
-from huggingface_hub import snapshot_download
+import os
 
-data = snapshot_download(repo_id="MBZUAI/LaMini-instruction", repo_type="dataset", local_dir="./data/MBZUAI_LaMini-instruction", local_dir_use_symlinks=False)
+from datasets import load_dataset
+from dotenv import load_dotenv
+
+load_dotenv()
+
+dataset = load_dataset("allenai/c4", "en", cache_dir=os.getenv("HF_DATASETS_CACHE"))
