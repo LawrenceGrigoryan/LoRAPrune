@@ -19,6 +19,7 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
         result["input_ids"].append(tokenizer.eos_token_id)
         result["attention_mask"].append(1)
 
+    # models internally perform the label shift
     result["labels"] = result["input_ids"].copy()
 
     return result
@@ -42,7 +43,6 @@ def generate_and_tokenize_prompt(data_point: dict, train_on_inputs: bool):
         tokenized_user_prompt = tokenize(user_prompt, add_eos_token=False)
         user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
-        # models internally perform the label shift
         tokenized_full_prompt["labels"] = [
             -100
         ] * user_prompt_len + tokenized_full_prompt["labels"][
