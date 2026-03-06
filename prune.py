@@ -229,7 +229,7 @@ def train(
             fp16=fp16,
             logging_steps=5,
             optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+            eval_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=50 if val_set_size > 0 else None,
             save_steps=50,
