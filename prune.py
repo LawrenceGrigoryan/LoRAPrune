@@ -6,7 +6,7 @@ import fire
 import torch
 import transformers
 from transformers import DataCollatorForSeq2Seq
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze
 from loraprune.lora import LoraConfig
@@ -167,8 +167,9 @@ def train(
     # from peft import get_peft_model
     model = get_peft_model(model, config)
 
-    if data_path.endswith(".json"):  # todo: support jsonl
-        data = load_dataset("json", data_files=data_path)
+    # c4 is too big to load into memory, so we save a smaller random sample
+    if data_path.startswith("./data/"):
+        data = load_from_disk(data_path)
     else:
         data = load_dataset(data_path)
 
