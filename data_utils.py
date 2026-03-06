@@ -36,7 +36,7 @@ def generate_sft_sample(data_point):
 {data_point["response"]}"""
 
 
-def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer,cutoff_len: int, train_on_inputs: bool):
+def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
         tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True, add_bos_token=False)
         user_prompt = generate_sft_sample({**data_point, "response": ""})

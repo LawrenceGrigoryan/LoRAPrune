@@ -1,6 +1,7 @@
 import os
 import sys
 from typing import List
+from functools import partial
 
 import fire
 import torch
@@ -116,7 +117,7 @@ def train(
 
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        load_in_8bit=load_in_8bit,
+        # load_in_8bit=load_in_8bit,
         torch_dtype=torch.bfloat16,
         device_map=device_map,
     )
@@ -197,19 +198,21 @@ def train(
             print(f"Checkpoint {checkpoint_name} not found")
 
     # utils.print_trainable_parameters(model)
-
+    generate_and_tokenize_prompt_partial = partial(
+        generate_and_tokenize_prompt, train_on_inputs=train_on_inputs, cutoff_len=cutoff_len, tokenizer=tokenizer
+    )
     if val_set_size > 0:
         train_val = data["train"].train_test_split(
             train_size=train_set_size, test_size=val_set_size, shuffle=True, seed=42
         )
         train_data = (
-            train_val["train"].shuffle().map(generate_and_tokenize_prompt)
+            train_val["train"].shuffle().map(generate_and_tokenize_prompt_partial)
         )
         val_data = (
-            train_val["test"].shuffle().map(generate_and_tokenize_prompt)
+            train_val["test"].shuffle().map(generate_and_tokenize_prompt_partial)
         )
     else:
-        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
+        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt_partial)
         val_data = None
 
     trainer = LoRAPruneTrainer(
