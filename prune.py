@@ -169,10 +169,10 @@ def train(
     model = get_peft_model(model, config)
 
     # c4 is too big to load into memory, so we save a smaller random sample
-    if data_path.startswith("./data/"):
-        data = load_from_disk(data_path)
-    else:
+    try:
         data = load_dataset(data_path)
+    except FileNotFoundError:
+        data = load_from_disk(data_path)
 
     freeze(model)
     model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
