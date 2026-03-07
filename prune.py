@@ -147,7 +147,7 @@ def train(
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     # FIXME: switch to sequence packing
-    tokenizer.add_special_tokens({"pad_token": "<pad>"})  # unk. we want this to be different from the eos token
+    tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
     tokenizer.padding_side = "left"  # Allow batched inference
 
     if load_in_8bit:
