@@ -13,9 +13,9 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
         add_special_tokens=False,  # we'll add these ourselves
         **kwargs,
     )
-    if add_bos_token:
-        result["input_ids"] = [tokenizer.bos_token_id] + result["input_ids"]
-        result["attention_mask"] = result["attention_mask"].append(1)
+    # BOS token added always
+    result["input_ids"] = [tokenizer.bos_token_id] + result["input_ids"]
+    result["attention_mask"].append(1)
     
     if (
         result["input_ids"][-1] != tokenizer.eos_token_id
@@ -43,14 +43,14 @@ def generate_sft_sample(data_point):
 
 def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
-        tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True, add_bos_token=False)
+        tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True, add_bos_token=True)
         user_prompt = generate_sft_sample({**data_point, "response": ""})
-        tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False, add_bos_token=False)
+        tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False, add_bos_token=True)
         user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
         tokenized_full_prompt["labels"] = [
             -100
-        ] * user_prompt_len + [tokenizer.bos_token_id] + tokenized_full_prompt["labels"][
+        ] * user_prompt_len + tokenized_full_prompt["labels"][
             user_prompt_len:
         ]  # could be sped up, probably
     else:
