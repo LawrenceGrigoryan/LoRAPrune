@@ -15,6 +15,7 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
     )
     if add_bos_token:
         result["input_ids"] = [tokenizer.bos_token_id] + result["input_ids"]
+        result["attention_mask"] = result["attention_mask"].append(1)
     
     if (
         result["input_ids"][-1] != tokenizer.eos_token_id
