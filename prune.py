@@ -171,7 +171,8 @@ def train(
     # c4 is too big to load into memory, so we save a smaller random sample
     try:
         data = load_dataset(data_path)
-    except FileNotFoundError:
+    except Exception as e:
+        logger.warning(f"Error occurred while loading dataset: {e}")
         data = load_from_disk(data_path)
 
     freeze(model)
@@ -256,12 +257,12 @@ def train(
 
     model.config.use_cache = False
 
-    old_state_dict = model.state_dict
-    model.state_dict = (
-        lambda self, *_, **__: get_peft_model_state_dict(
-            self, old_state_dict()
-        )
-    ).__get__(model, type(model))
+    # old_state_dict = model.state_dict
+    # model.state_dict = (
+    #     lambda self, *_, **__: get_peft_model_state_dict(
+    #         self, old_state_dict()
+    #     )
+    # ).__get__(model, type(model))
 
     # if torch.__version__ >= "2" and sys.platform != "win32":
     #     model = torch.compile(model)
