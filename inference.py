@@ -1,13 +1,9 @@
-import json
-import sys
-import os
 import fire
 import torch
 import time
-import transformers
 import numpy as np
 from typing import List
-from peft.peft_model import set_peft_model_state_dict
+from peft import PeftModel
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
@@ -63,27 +59,8 @@ def main(
 
     model = get_peft_model(model, config)
     if lora_weights:
-        # Check the available weights and load them
-        checkpoint_name = os.path.join(
-            lora_weights, "pytorch_model.bin"
-        )  # Full checkpoint
-        if not os.path.exists(checkpoint_name):
-            checkpoint_name = os.path.join(
-                lora_weights, "adapter_model.bin"
-            )  # only LoRA model - LoRA config above has to fit
-            resume_from_checkpoint = (
-                False  # So the trainer won't try loading its state
-            )
-        # The two files above have a different name depending on how they were saved, but are actually the same.
-        if os.path.exists(checkpoint_name):
-            print(f"Restarting from {checkpoint_name}")
-            adapters_weights = torch.load(checkpoint_name)
-            for name, param in adapters_weights.items():
-                if 'lora_mask' in name:
-                    adapters_weights[name] = param.reshape(-1)
-            model = set_peft_model_state_dict(model, adapters_weights)
-        else:
-            print(f"Checkpoint {checkpoint_name} not found")
+        model = PeftModel.from_pretrained(model, lora_weights, config=config)
+
 
     model = model.to(device)
 
@@ -91,9 +68,9 @@ def main(
     prune_from_checkpoint(model)
 
     # unwind broken decapoda-research config
-    model.config.pad_token_id = tokenizer.pad_token_id = 0  # unk
-    model.config.bos_token_id = 1
-    model.config.eos_token_id = 2
+    model.config.pad_token_id = tokenizer.pad_token_id = 128004 # unk
+    model.config.bos_token_id = 128000
+    model.config.eos_token_id = 128001
 
     model.half()  # seems to fix bugs for some users.
 
@@ -124,7 +101,7 @@ def main(
         test_ids_batch = torch.stack(test_ids_batch)
         return IndexDataset(tensors=test_ids_batch)
 
-    def PPLMetric(model, loader, device="cuda"):
+    def PPLMetric(model, loader, device=device):
         ppl = llama_eval(model, loader, device)
         print(ppl)
         return ppl
