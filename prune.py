@@ -213,11 +213,10 @@ def train(
             logging_steps=5,
             optim="adamw_torch",
             eval_strategy="steps" if val_set_size > 0 else "no",
-            save_strategy="steps",
+            save_strategy="no",  # don't save with save_pretrained, results in a corrupted save
             eval_steps=50 if val_set_size > 0 else None,
             save_steps=50,
             output_dir=output_dir,
-            save_total_limit=3,
             load_best_model_at_end=False,
             ddp_find_unused_parameters=False if ddp else None,
             group_by_length=group_by_length,
