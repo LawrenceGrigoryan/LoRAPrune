@@ -14,6 +14,7 @@ from loraprune.lora import LoraConfig
 from loraprune.peft_model import get_peft_model
 from data_utils import generate_and_tokenize_prompt
 from loguru import logger
+from safetensors.torch import save_file as safe_save_file
 
 from peft import (
     prepare_model_for_kbit_training,
@@ -239,12 +240,16 @@ def train(
     model.config.use_cache = False
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
-
-    model.save_pretrained(output_dir)
-
-    print(
-        "\n If there's a warning about missing keys above, please disregard :)"
-    )
+    
+    # manually save only adapter weights
+    lora_state_dict = {
+        k: v
+        for k, v in model.state_dict().items()
+        if "lora_" in k
+    }
+    os.makedirs(output_dir, exist_ok=True)
+    safe_save_file(lora_state_dict, os.path.join(output_dir, ADAPTER_WEIGHTS_NAME))
+    config.save_pretrained(output_dir)
 
 
 if __name__ == "__main__":
