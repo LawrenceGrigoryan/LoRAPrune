@@ -1,9 +1,13 @@
+import json
+import sys
+import os
 import fire
 import torch
 import time
+import transformers
 import numpy as np
 from typing import List
-from peft import PeftModel
+from peft.utils.save_and_load import load_peft_weights
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
@@ -59,8 +63,17 @@ def main(
 
     model = get_peft_model(model, config)
     if lora_weights:
-        model = PeftModel.from_pretrained(model, lora_weights, config=config)
+        adapters_weights = load_peft_weights(lora_weights)
+        for name, param in adapters_weights.items():
+            if 'lora_mask' in name:
+                adapters_weights[name] = param.reshape(-1)
 
+        # inject only adapter state dict
+        # will return missing keys warning for base model's layers that
+        # are not in the adapter state dict
+        model.load_state_dict(adapters_weights, strict=False)
+    else:
+        raise ValueError("LoRA weights path must be specified!")
 
     model = model.to(device)
 
