@@ -1,15 +1,18 @@
 import numpy as np
 import torch
-from .lora import Linear, Linear8bitLt
+from .lora import Linear
 
 pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
                   'mlp': ['up_proj', 'gate_proj'],
                   'block': ['o_proj', 'down_proj']}
 
+# for llama-3.1/2, must be changed for a diff model
 NUM_ATTENTION_HEADS = 32
+HEAD_DIM = 64
+NUM_KV_HEADS = 8
 
 def _is_target_larer(module):
-    return (isinstance(module, Linear) or isinstance(module, Linear8bitLt)) and module.is_prune
+    return isinstance(module, Linear) and module.is_prune
 
 def unfreeze(model):
     for name, module in model.named_modules():
@@ -109,13 +112,19 @@ def prune_one_layer(layer):
     prune_fp16_module(layer.self_attn.q_proj, layer.self_attn.q_proj.lora_mask, False)
     prune_fp16_module(layer.self_attn.k_proj, layer.self_attn.k_proj.lora_mask, False)
     prune_fp16_module(layer.self_attn.v_proj, layer.self_attn.v_proj.lora_mask, False)
+    # q_proj out_features = o_proj in_features
     prune_fp16_module(layer.self_attn.o_proj, layer.self_attn.q_proj.lora_mask, True)
-    layer.self_attn.num_heads = int(layer.self_attn.q_proj.lora_mask.sum()) // 128
+    layer.self_attn.num_heads = int(layer.self_attn.q_proj.lora_mask.sum()) // HEAD_DIM
     layer.self_attn.hidden_size = int(layer.self_attn.q_proj.lora_mask.sum())
+    # for GQA
+    layer.self_attn.num_key_value_heads = (
+        layer.self_attn.k_proj.out_features // HEAD_DIM
+    )
 
     ## mlp
     prune_fp16_module(layer.mlp.gate_proj, layer.mlp.gate_proj.lora_mask, False)
     prune_fp16_module(layer.mlp.up_proj, layer.mlp.up_proj.lora_mask, False)
+    # gate/up outputs → down inputs
     prune_fp16_module(layer.mlp.down_proj, layer.mlp.gate_proj.lora_mask, True)
 
     ## reset mask
@@ -124,6 +133,8 @@ def prune_one_layer(layer):
     del(layer.self_attn.v_proj.lora_mask)
     del(layer.mlp.gate_proj.lora_mask)
     del(layer.mlp.up_proj.lora_mask)
+    del(layer.self_attn.o_proj.lora_mask)
+    del(layer.mlp.down_proj.lora_mask)
 
 def prune(model):
     for layer_id, layer in enumerate(model.model.model.layers):
@@ -137,8 +148,9 @@ def local_prune(model, s_dict, ratio, target_ratio):
         if _is_target_larer(module):
             original_param_num += np.prod(module.weight.shape)
             pruned_param_num += np.prod(module.weight.shape) * ratio
-            is_attn = name.split('.')[-1] in pruning_groups['self_attn']
-            if name.split('.')[-1] in pruning_groups['block']:
+            module_name = name.split('.')[-1]
+            is_attn = module_name in pruning_groups['self_attn']
+            if module_name in pruning_groups['block']:
                 continue
             name = ".".join(name.split('.')[:-1])
             if not hasattr(module, 'lora_mask'):
@@ -149,8 +161,15 @@ def local_prune(model, s_dict, ratio, target_ratio):
             c_mask = module.lora_mask.data
             mask = torch.ones_like(c_mask)
 
+            if module_name == "q_proj":
+                num_heads = NUM_ATTENTION_HEADS  # 32 for llama-3.2
+            elif module_name in ["k_proj", "v_proj"]:
+                num_heads = NUM_KV_HEADS  # 8 for llama-3.2
+            else:
+                num_heads = None
+
             if is_attn:
-                head_dim = module.out_features // NUM_ATTENTION_HEADS
+                head_dim = module.out_features // num_heads
                 mask = mask.reshape(-1, head_dim)[:, 0]
                 c_mask = c_mask.reshape(-1, head_dim)[:, 0]
                 total_num /= head_dim
