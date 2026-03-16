@@ -34,16 +34,7 @@ def init_sensitivity_dict(model):
         if _is_target_larer(module):
             module_name = name.split('.')[-1]
             if module_name in pruning_groups['self_attn']:
-
-                # consider GQA
-                if module_name == "q_proj":
-                    num_heads = NUM_ATTENTION_HEADS  # 32 for llama-3.2
-                elif module_name in ["k_proj", "v_proj"]:
-                    num_heads = NUM_KV_HEADS  # 8 for llama-3.2
-                else:
-                    num_heads = None
-
-                head_dim = module.out_features // num_heads
+                head_dim = HEAD_DIM
                 groups = module.out_features // head_dim
             else:
                 groups = module.out_features
@@ -125,6 +116,7 @@ def prune_one_layer(layer):
     prune_fp16_module(layer.self_attn.k_proj, layer.self_attn.k_proj.lora_mask, False)
     prune_fp16_module(layer.self_attn.v_proj, layer.self_attn.v_proj.lora_mask, False)
     # q_proj out_features = o_proj in_features
+    # after removing some heads o_proj rows must be removed accordingly
     prune_fp16_module(layer.self_attn.o_proj, layer.self_attn.q_proj.lora_mask, True)
     layer.self_attn.num_heads = int(layer.self_attn.q_proj.lora_mask.sum()) // HEAD_DIM
     layer.self_attn.hidden_size = int(layer.self_attn.q_proj.lora_mask.sum())
@@ -137,6 +129,7 @@ def prune_one_layer(layer):
     prune_fp16_module(layer.mlp.gate_proj, layer.mlp.gate_proj.lora_mask, False)
     prune_fp16_module(layer.mlp.up_proj, layer.mlp.up_proj.lora_mask, False)
     # gate/up outputs → down inputs
+    # after removing 
     prune_fp16_module(layer.mlp.down_proj, layer.mlp.gate_proj.lora_mask, True)
 
     ## reset mask
