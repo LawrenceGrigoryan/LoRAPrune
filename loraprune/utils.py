@@ -34,7 +34,16 @@ def init_sensitivity_dict(model):
         if _is_target_larer(module):
             module_name = name.split('.')[-1]
             if module_name in pruning_groups['self_attn']:
-                head_dim = module.out_features // NUM_ATTENTION_HEADS
+
+                # consider GQA
+                if module_name == "q_proj":
+                    num_heads = NUM_ATTENTION_HEADS  # 32 for llama-3.2
+                elif module_name in ["k_proj", "v_proj"]:
+                    num_heads = NUM_KV_HEADS  # 8 for llama-3.2
+                else:
+                    num_heads = None
+
+                head_dim = module.out_features // num_heads
                 groups = module.out_features // head_dim
             else:
                 groups = module.out_features
@@ -80,10 +89,13 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
     s = (grad * (b @ a * layer.scaling + weight)).abs()
     if transpose:
         s = s.t()
+
     if is_attn:
-        # Compute dim?
-        head_dim = layer.out_features // NUM_ATTENTION_HEADS
+        # head_dim = layer.out_features // NUM_ATTENTION_HEADS
+        # all heads have the same head_dim, so hardcoding is fine for now
+        head_dim = HEAD_DIM
         s = s.reshape(s.shape[0] // head_dim, -1)
+
     s = s.sum(1)
     if norm:
         s = s / (torch.linalg.norm(s) + 1e-8)
@@ -161,6 +173,7 @@ def local_prune(model, s_dict, ratio, target_ratio):
             c_mask = module.lora_mask.data
             mask = torch.ones_like(c_mask)
 
+            # consider GQA
             if module_name == "q_proj":
                 num_heads = NUM_ATTENTION_HEADS  # 32 for llama-3.2
             elif module_name in ["k_proj", "v_proj"]:
@@ -168,11 +181,12 @@ def local_prune(model, s_dict, ratio, target_ratio):
             else:
                 num_heads = None
 
+            # for attention - reshape the mask to be of size [n_heads, head_dim] to prune full heads
             if is_attn:
                 head_dim = module.out_features // num_heads
                 mask = mask.reshape(-1, head_dim)[:, 0]
                 c_mask = c_mask.reshape(-1, head_dim)[:, 0]
-                total_num /= head_dim
+                total_num /= head_dim  # convert into number of heads instead of neurons
             need_prune_num = int(total_num * ratio)
             importance = s_dict[name] * c_mask
             can_prune = torch.argsort(importance)[:need_prune_num]
