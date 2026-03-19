@@ -32,15 +32,22 @@ def init_sensitivity_dict(model):
     sensitivity_record = {}
     for name, module in model.named_modules():
         if _is_target_larer(module):
-            module_name = name.split('.')[-1]
-            if module_name in pruning_groups['self_attn']:
+            weight_name = name.split('.')[-1]
+            if weight_name in pruning_groups['self_attn']:
                 head_dim = HEAD_DIM
                 groups = module.out_features // head_dim
             else:
                 groups = module.out_features
-            name = ".".join(name.split('.')[:-1])
+                
+            # different num of heads in GQA => can't add up improtance for the whole block together
+            if weight_name in ["k_proj", "v_proj", "q_proj"]:
+                name = name
+            else:
+                name = ".".join(name.split('.')[:-1])
+
             if name in sensitivity_record:
                 continue
+            
             sensitivity_record[name] = module.lora_A.weight.data.new_zeros(groups)
     return sensitivity_record
 
@@ -48,10 +55,16 @@ def update_sensitivity_dict(model, s_dict, pruning_type):
     s_all = init_sensitivity_dict(model)
     for name, module in model.named_modules():
         if _is_target_larer(module):
-            is_attn = name.split('.')[-1] in pruning_groups['self_attn']
-            fan_in = name.split('.')[-1] in pruning_groups['block']
+            weight_name = name.split('.')[-1]
+            is_attn = weight_name in pruning_groups['self_attn']
+            fan_in = weight_name in pruning_groups['block']
             s = compute_sensitivity(module, is_attn, pruning_type, fan_in)
-            name = ".".join(name.split('.')[:-1])
+            # different num of heads in GQA => can't add up improtance for the whole block together
+            if weight_name in ["k_proj", "v_proj", "q_proj"]:
+                name = name
+            else:
+                name = ".".join(name.split('.')[:-1])
+            
             s_all[name] += s
     for name, imp in s_all.items():
         if torch.isnan(imp.sum()):
@@ -82,8 +95,7 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
         s = s.t()
 
     if is_attn:
-        # head_dim = layer.out_features // NUM_ATTENTION_HEADS
-        # all heads have the same head_dim, so hardcoding is fine for now
+        # FIXME: all heads have the same head_dim, so hardcoding is fine for now
         head_dim = HEAD_DIM
         s = s.reshape(s.shape[0] // head_dim, -1)
 
