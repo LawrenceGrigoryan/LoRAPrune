@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import List
 from functools import partial
 
@@ -20,10 +19,10 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft.peft_model import get_peft_model_state_dict, set_peft_model_state_dict
 
 ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 IGNORE_INDEX = -100
+SUPPORTED_MODELS = ["llama", "qwen2"]
 
 
 def train(
@@ -124,6 +123,10 @@ def train(
         torch_dtype=torch.bfloat16,
         device_map=device_map,
     )
+    # infer model type for tokenization and other stuff
+    model_type = model.config.model_type
+    if model_type not in SUPPORTED_MODELS:
+        raise ValueError(f"`{model_type}` model type is not supported!")
     
     if torch.cuda.is_available():
         device_id = torch.cuda.current_device()
@@ -148,10 +151,19 @@ def train(
             logger.info(f"  Compute capability: {props.major}.{props.minor}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
-
+    
+    # llama-3.2-1b
     # FIXME: switch to sequence packing
-    tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
     tokenizer.padding_side = "left"  # Allow batched inference
+    if model_type == "llama":
+        tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
+    elif model_type == "qwen2":
+        tokenizer.pad_token = "<|pad|>"
+        # qwen2 lacks bos token
+        tokenizer.bos_token = "<|im_start|>"
+
+    # resize embeddings (might be redundant)
+    model.resize_token_embeddings(len(tokenizer))
 
     if load_in_8bit:
         model = prepare_model_for_kbit_training(model)
