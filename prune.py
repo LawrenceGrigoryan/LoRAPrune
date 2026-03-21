@@ -158,7 +158,8 @@ def train(
     if model_type == "llama":
         tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
     elif model_type == "qwen2":
-        tokenizer.pad_token = "<|pad|>"
+        # pad == eos, add a new one
+        tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
         # qwen2 lacks bos token
         tokenizer.bos_token = "<|im_start|>"
 
