@@ -6,16 +6,15 @@ pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
                   'mlp': ['up_proj', 'gate_proj'],
                   'block': ['o_proj', 'down_proj']}
 
-# for llama-3.1/2, must be changed for a diff model
-NUM_ATTENTION_HEADS = 32
+NUM_ATTENTION_HEADS = 16
 HEAD_DIM = 64
-NUM_KV_HEADS = 8
+NUM_KV_HEADS = 16
 
 def _is_target_larer(module):
     return isinstance(module, Linear) and module.is_prune
 
 def unfreeze(model):
-    for name, module in model.named_modules():
+    for _, module in model.named_modules():
         if _is_target_larer(module):
             module.weight.requires_grad = True
 
@@ -34,21 +33,17 @@ def init_sensitivity_dict(model):
         if _is_target_larer(module):
             weight_name = name.split('.')[-1]
             if weight_name in pruning_groups['self_attn']:
-                head_dim = HEAD_DIM
-                groups = module.out_features // head_dim
+                groups = module.out_features // HEAD_DIM
             else:
                 groups = module.out_features
                 
             # different num of heads in GQA => can't add up improtance for the whole block together
-            if weight_name in ["k_proj", "v_proj", "q_proj"]:
-                name = name
-            else:
-                name = ".".join(name.split('.')[:-1])
+            group_name = ".".join(name.split('.')[:-1])
 
-            if name in sensitivity_record:
+            if group_name in sensitivity_record:
                 continue
             
-            sensitivity_record[name] = module.lora_A.weight.data.new_zeros(groups)
+            sensitivity_record[group_name] = module.lora_A.weight.data.new_zeros(groups)
     return sensitivity_record
 
 def update_sensitivity_dict(model, s_dict, pruning_type):
@@ -59,18 +54,19 @@ def update_sensitivity_dict(model, s_dict, pruning_type):
             is_attn = weight_name in pruning_groups['self_attn']
             fan_in = weight_name in pruning_groups['block']
             s = compute_sensitivity(module, is_attn, pruning_type, fan_in)
-            # different num of heads in GQA => can't add up improtance for the whole block together
-            if weight_name in ["k_proj", "v_proj", "q_proj"]:
-                name = name
-            else:
-                name = ".".join(name.split('.')[:-1])
             
-            s_all[name] += s
-    for name, imp in s_all.items():
+            # different num of heads in GQA => can't add up improtance for the whole block together
+            group_name = ".".join(name.split('.')[:-1])
+            
+            s_all[group_name] += s
+
+    for group_name, imp in s_all.items():
         if torch.isnan(imp.sum()):
             return s_dict
-    for name, imp in s_dict.items():
-        s_dict[name] = imp * 0.9 + s_all[name] * 0.1
+
+    for group_name, imp in s_dict.items():
+        s_dict[group_name] = imp * 0.9 + s_all[group_name] * 0.1
+
     return s_dict
 
 def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, norm=True):
@@ -96,8 +92,7 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
 
     if is_attn:
         # FIXME: all heads have the same head_dim, so hardcoding is fine for now
-        head_dim = HEAD_DIM
-        s = s.reshape(s.shape[0] // head_dim, -1)
+        s = s.reshape(s.shape[0] // HEAD_DIM, -1)
 
     s = s.sum(1)
     if norm:
@@ -169,7 +164,12 @@ def local_prune(model, s_dict, ratio, target_ratio):
             is_attn = module_name in pruning_groups['self_attn']
             if module_name in pruning_groups['block']:
                 continue
-            name = ".".join(name.split('.')[:-1])
+            
+            if module_name in ["k_proj", "v_proj", "q_proj"]:
+                name = name
+            else:
+                name = ".".join(name.split('.')[:-1])
+
             if not hasattr(module, 'lora_mask'):
                 continue
             if (1-module.lora_mask.mean()).item() >= target_ratio:
