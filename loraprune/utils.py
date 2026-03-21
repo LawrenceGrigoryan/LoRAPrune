@@ -105,7 +105,8 @@ def prune_fp16_module(module, mask, transpose):
     if not transpose:
         module.weight.data = module.weight.data[mask]
         module.out_features = int(mask.sum())
-        if module.bias:
+        # none for llama-3.2, not none for qwen2
+        if module.bias is not None:
             module.bias.data = module.bias.data[mask]
         module.lora_B.weight.data = module.lora_B.weight.data[mask]
         module.lora_B.out_features = int(mask.sum())
