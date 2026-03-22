@@ -97,6 +97,7 @@ def main(
         
         total_params_pruned = sum(p.numel() for p in model.parameters())
         logger.info(f"Total model parameters after pruning: {total_params_pruned}")
+        logger.info(f"Parameters left after pruning: {round((total_params_pruned / total_params)*100, 2)}%")
     else:
         logger.warning("LoRA weights path is not specified, evaluating the base model...")
 
