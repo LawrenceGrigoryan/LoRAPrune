@@ -24,7 +24,7 @@ else:
 try:
     if torch.backends.mps.is_available():
         device = "mps"
-except:  # noqa: E722
+except:
     pass
 
 
@@ -57,11 +57,12 @@ def main(
         base_model
     ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
 
+    logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         load_in_8bit=False,
         torch_dtype=torch.float16,
-        device_map='auto',
+        device_map=device,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, legacy=False)
