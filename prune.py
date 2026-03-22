@@ -163,8 +163,8 @@ def train(
         # qwen2 lacks bos token
         tokenizer.bos_token = "<|im_start|>"
 
-    # resize embeddings (might be redundant)
-    model.resize_token_embeddings(len(tokenizer))
+        # resize embeddings (might be redundant)
+        model.resize_token_embeddings(len(tokenizer))
 
     if load_in_8bit:
         model = prepare_model_for_kbit_training(model)
