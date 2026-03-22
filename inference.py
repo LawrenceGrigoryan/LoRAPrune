@@ -68,6 +68,8 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(base_model, legacy=False)
     prepare_tokenizer(tokenizer, model.config.model_type)
 
+    total_params = sum(p.numel() for p in model.parameters())
+    logger.info(f"Total model parameters: {total_params}")
     if lora_weights:
         config = LoraConfig(
             r=lora_r,
@@ -93,6 +95,9 @@ def main(
         
         freeze(model)
         prune_from_checkpoint(model)
+        
+        total_params_pruned = sum(p.numel() for p in model.parameters())
+        logger.info(f"Total model parameters after pruning: {total_params_pruned}")
     else:
         logger.warning("LoRA weights path is not specified, evaluating the base model...")
 
