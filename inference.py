@@ -5,7 +5,6 @@ import fire
 import torch
 import numpy as np
 from peft.utils.save_and_load import load_peft_weights
-from peft.peft_model import set_peft_model_state_dict
 from datasets import load_dataset
 from loguru import logger
 from torch.utils.data.dataset import Dataset
@@ -89,7 +88,7 @@ def main(
         # inject only adapter state dict
         # will return missing keys warning for base model's layers that
         # are not in the adapter state dict
-        set_peft_model_state_dict(model, adapter_weights)
+        model.load_state_dict(adapter_weights, strict=False)
         
         model = model.to(device)
         
