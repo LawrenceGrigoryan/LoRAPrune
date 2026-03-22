@@ -11,7 +11,7 @@ from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze
 from loraprune.lora import LoraConfig
 from loraprune.peft_model import get_peft_model
-from data_utils import generate_and_tokenize_prompt
+from data_utils import prepare_tokenizer, generate_and_tokenize_prompt
 from loguru import logger
 from safetensors.torch import save_file as safe_save_file
 
@@ -151,20 +151,10 @@ def train(
             logger.info(f"  Compute capability: {props.major}.{props.minor}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
-    
-    # llama-3.2-1b
-    # FIXME: switch to sequence packing
-    tokenizer.padding_side = "left"  # Allow batched inference
-    if model_type == "llama":
-        tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
-    elif model_type == "qwen2":
-        # pad == eos, add a new one
-        tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
-        # qwen2 lacks bos token
-        tokenizer.bos_token = "<|im_start|>"
+    prepare_tokenizer(tokenizer, model_type)
 
-        # resize embeddings (might be redundant)
-        model.resize_token_embeddings(len(tokenizer))
+    # resize embeddings (might be redundant)
+    model.resize_token_embeddings(len(tokenizer))
 
     if load_in_8bit:
         model = prepare_model_for_kbit_training(model)

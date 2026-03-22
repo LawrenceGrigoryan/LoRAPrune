@@ -1,6 +1,24 @@
 from transformers import AutoTokenizer
 
 
+def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str) -> None:
+    """
+    Prepare tokenizer in-place
+    """
+    # FIXME: switch to sequence packing
+    tokenizer.padding_side = "left"  # Allow batched inference
+    if model_type == "llama":  # llama-3.2-1b
+        tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
+    elif model_type == "qwen2":  # qwen-1.5-0.5b
+        # pad == eos, add a new one
+        tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
+        # qwen2 lacks bos token
+        tokenizer.bos_token = "<|im_start|>"
+    else:
+        raise ValueError(f"Unsupported model type `{model_type}`!")
+        
+
+
 def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_token: bool = True, **kwargs):
     # there's probably a way to do this with the tokenizer settings
     # but again, gotta move fast
