@@ -166,10 +166,7 @@ def local_prune(model, s_dict, ratio, target_ratio):
             if module_name in pruning_groups['block']:
                 continue
             
-            if module_name in ["k_proj", "v_proj", "q_proj"]:
-                name = name
-            else:
-                name = ".".join(name.split('.')[:-1])
+            group_name = ".".join(name.split('.')[:-1])
 
             if not hasattr(module, 'lora_mask'):
                 continue
@@ -184,8 +181,6 @@ def local_prune(model, s_dict, ratio, target_ratio):
                 num_heads = NUM_ATTENTION_HEADS  # 32 for llama-3.2
             elif module_name in ["k_proj", "v_proj"]:
                 num_heads = NUM_KV_HEADS  # 8 for llama-3.2
-            else:
-                num_heads = None
 
             # for attention - reshape the mask to be of size [n_heads, head_dim] to prune full heads
             if is_attn:
@@ -194,7 +189,7 @@ def local_prune(model, s_dict, ratio, target_ratio):
                 c_mask = c_mask.reshape(-1, head_dim)[:, 0]
                 total_num /= head_dim  # convert into number of heads instead of neurons
             need_prune_num = int(total_num * ratio)
-            importance = s_dict[name] * c_mask
+            importance = s_dict[group_name] * c_mask
             can_prune = torch.argsort(importance)[:need_prune_num]
             mask[can_prune] = 0
             if is_attn:
