@@ -16,7 +16,6 @@ def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str) -> None:
         tokenizer.bos_token = "<|im_start|>"
     else:
         raise ValueError(f"Unsupported model type `{model_type}`!")
-        
 
 
 def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_token: bool = True, **kwargs):
