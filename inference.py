@@ -143,7 +143,7 @@ def main(
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
-    print("wikitext2 ppl:{:.2f}  inference time:{:2f}".format(results, times))
+    print("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
 
     times = []
     eval_data = load_dataset('ptb_text_only', 'penn_treebank', split='validation', trust_remote_code=True)
@@ -151,7 +151,7 @@ def main(
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
-    print("PTB ppl:{:.2f}  inference time:{:2f}".format(results, times))
+    print("PTB PPL: {:.2f}  inference time: {:2f}".format(results, times))
 
     return
 
