@@ -262,7 +262,7 @@ def train(
     os.makedirs(output_dir, exist_ok=True)
     safe_save_file(lora_state_dict, os.path.join(output_dir, ADAPTER_WEIGHTS_NAME))
     config.save_pretrained(output_dir)
-
+    tokenizer.save_pretrained(output_dir)
 
 if __name__ == "__main__":
     fire.Fire(train)
