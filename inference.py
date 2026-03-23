@@ -89,8 +89,8 @@ def main(
         # will return missing keys warning for base model's layers that
         # are not in the adapter state dict
         model.load_state_dict(adapter_weights, strict=False)
-        
-        model = model.to(device)
+
+        model.to(device)
         
         freeze(model)
         prune_from_checkpoint(model)
@@ -102,7 +102,6 @@ def main(
         logger.warning("LoRA weights path is not specified, evaluating the base model...")
 
     model.half()  # seems to fix bugs for some users.
-    model.eval()
     
     def process_data(samples, tokenizer, seq_len, field_name):
         test_ids = tokenizer("\n\n".join(samples[field_name]), return_tensors='pt').input_ids[0]
@@ -117,30 +116,31 @@ def main(
 
     def PPLMetric(model, loader, device=device):
         ppl = llama_eval(model, loader, device)
-        print(ppl)
         return ppl
 
     @torch.no_grad()
     def llama_eval(model, loader, device):
-        model.eval()
         nlls = []
-        for batch in loader:
-            batch = batch.to(device)
-            with torch.cuda.amp.autocast():
+
+        model.eval()
+        with torch.inference_mode():
+            for batch in loader:
+                batch = batch.to(device)
                 t1 = time.time()
                 output = model(batch)
                 times.append(time.time() - t1)
-            lm_logits = output.logits
+                lm_logits = output.logits
 
-            shift_logits = lm_logits[:, :-1, :].contiguous()
-            shift_labels = batch[:, 1:].contiguous()
+                shift_logits = lm_logits[:, :-1, :].contiguous()
+                shift_labels = batch[:, 1:].contiguous()
 
-            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
-            loss = loss_fct(shift_logits.reshape(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            nlls.append(loss)
-        # print(torch.cat(nlls, dim=-1).mean())
-        ppl = np.exp(torch.cat(nlls, dim=-1).mean().item())
-        return ppl.item()
+                loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
+                loss = loss_fct(shift_logits.reshape(-1, shift_logits.size(-1)), shift_labels.view(-1))
+                if not torch.isnan(loss).any():
+                    nlls.append(loss)
+            ppl = np.exp(torch.cat(nlls, dim=-1).mean().item())
+
+            return ppl.item()
 
     times = []
     eval_data = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
