@@ -60,9 +60,9 @@ def generate_sft_sample(data_point):
 
 def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
-        tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True, add_bos_token=True)
+        tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True)
         user_prompt = generate_sft_sample({**data_point, "response": ""})
-        tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False, add_bos_token=True)
+        tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False)
         user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
         tokenized_full_prompt["labels"] = [
