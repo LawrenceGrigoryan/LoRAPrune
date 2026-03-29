@@ -14,7 +14,7 @@ from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
 from data_utils import prepare_tokenizer
-from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5
+from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
 from evaluation.utils import compute_loglikelihood
 
 
@@ -58,8 +58,9 @@ def main(base_model: str = "",
 
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total model parameters: {total_params}")
+    model_type = model.config.model_type
     if lora_weights:
-        prepare_tokenizer(tokenizer, model.config.model_type)
+        prepare_tokenizer(tokenizer, model_type)
 
         config = LoraConfig(
             r=lora_r,
@@ -96,7 +97,12 @@ def main(base_model: str = "",
 
     # MCQ - multiple choice question evaluation, llm as a judge possible as well
     eval_dataset = load_dataset("nvidia/When2Call", "test")
-    dataset_prep = process_docs_qwen2_5(eval_dataset["mcq"])
+    if model_type == "qwen2":
+        dataset_prep = process_docs_qwen2_5(eval_dataset["mcq"])
+    elif model_type == "llama":
+        dataset_prep = process_docs_llama3_2(eval_dataset["mcq"])
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
 
     result = []
     for i in tqdm(range(len(dataset_prep))):
