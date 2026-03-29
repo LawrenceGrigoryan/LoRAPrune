@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 
 srun python eval_when2call.py \
-    --base_model "Qwen/Qwen1.5-0.5B-Chat" \
+    --base_model "./models/Qwen_Qwen1.5-0.5B-Chat" \
     --lora_weights "./outputs_dir/qwen15_05b_chat_lamini_20k/" \
     --lora_r 8 \
     --lora_alpha 16 \
