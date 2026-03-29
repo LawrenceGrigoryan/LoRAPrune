@@ -5,6 +5,7 @@ from datasets import load_dataset
 from loguru import logger
 import fire
 import torch
+import json
 import numpy as np
 from peft.utils.save_and_load import load_peft_weights
 from tqdm import tqdm
@@ -40,6 +41,7 @@ def main(base_model: str = "",
                 "up_proj"
             ],
         lora_weights: str | None = None,
+        output_path: str = "./when2call_results.jsonl",
     ):
     assert (
         base_model
@@ -96,8 +98,7 @@ def main(base_model: str = "",
     eval_dataset = load_dataset("nvidia/When2Call", "test")
     dataset_prep = process_docs_qwen2_5(eval_dataset["mcq"])
 
-    gold = []
-    predicted = []
+    result = []
     for i in tqdm(range(len(dataset_prep))):
         sample = dataset_prep[i]
         choices = sample["answers"]
@@ -108,8 +109,11 @@ def main(base_model: str = "",
             ll = compute_loglikelihood(prompt, model, tokenizer)
             answer_loglikelihoods[type] = ll
         predicted_choice = max(answer_loglikelihoods, key=lambda x: answer_loglikelihoods.get(x))
-        gold.append(correct_choice)
-        predicted.append(predicted_choice)
+        result.append({"gold": correct_choice, "predicted": predicted_choice})
+
+    with open(output_path, "w") as f:
+        for item in result:
+            f.write(json.dumps(item) + "\n")
 
 
 if __name__ == "__main__":
