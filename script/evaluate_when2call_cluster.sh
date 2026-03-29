@@ -1,4 +1,12 @@
-python eval_when2call.py \
+#!/usr/bin/env bash
+#SBATCH --job-name=loraprune_llama_32_1b_c4_20k
+#SBATCH --output=loraprune_test%j.log
+#SBATCH --error=loraprune_test%j.err
+#SBATCH --mail-user=REPLACE_USER_NAME@uni-hildesheim.de
+#SBATCH --partition=STUD
+#SBATCH --gres=gpu:1
+
+srun python eval_when2call.py \
     --base_model "Qwen/Qwen1.5-0.5B-Chat" \
     --lora_weights "./outputs_dir/qwen15_05b_chat_lamini_20k/" \
     --lora_r 8 \
