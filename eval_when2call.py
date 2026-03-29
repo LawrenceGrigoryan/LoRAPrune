@@ -9,6 +9,7 @@ import torch
 import json
 from peft.utils.save_and_load import load_peft_weights
 from tqdm import tqdm
+from dotenv import load_dotenv
 
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
@@ -17,6 +18,7 @@ from data_utils import prepare_tokenizer
 from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
 from evaluation.utils import compute_loglikelihood
 
+load_dotenv()
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -31,7 +33,6 @@ except:
 
 
 def main(base_model: str = "",
-         data_path: str = "nvidia/When2Call",
         lora_r: int = 8,
         lora_alpha: int = 16,
         lora_dropout: float = 0.,
@@ -97,7 +98,7 @@ def main(base_model: str = "",
     model.half()  # seems to fix bugs for some users.
 
     # MCQ - multiple choice question evaluation, llm as a judge possible as well
-    eval_dataset = load_dataset(data_path, "test")
+    eval_dataset = load_dataset("nvidia/When2Call", "test")
     if model_type == "qwen2":
         dataset_prep = process_docs_qwen2_5(eval_dataset["mcq"])
     elif model_type == "llama":
