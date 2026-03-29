@@ -8,6 +8,7 @@
 
 srun python eval_when2call.py \
     --base_model "./models/Qwen_Qwen1.5-0.5B-Chat" \
+    --data_path './data/benchmarks/nvidia___when2_call' \
     --lora_weights "./outputs_dir/qwen15_05b_chat_lamini_20k/" \
     --lora_r 8 \
     --lora_alpha 16 \

@@ -31,6 +31,7 @@ except:
 
 
 def main(base_model: str = "",
+         data_path: str = "nvidia/When2Call",
         lora_r: int = 8,
         lora_alpha: int = 16,
         lora_dropout: float = 0.,
@@ -96,7 +97,7 @@ def main(base_model: str = "",
     model.half()  # seems to fix bugs for some users.
 
     # MCQ - multiple choice question evaluation, llm as a judge possible as well
-    eval_dataset = load_dataset("nvidia/When2Call", "test")
+    eval_dataset = load_dataset(data_path, "test")
     if model_type == "qwen2":
         dataset_prep = process_docs_qwen2_5(eval_dataset["mcq"])
     elif model_type == "llama":
