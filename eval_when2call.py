@@ -106,7 +106,7 @@ def main(base_model: str = "",
 
     # FIXME: batched
     result = []
-    for i in tqdm(range(5)):
+    for i in tqdm(range(len(dataset_prep))):
         sample = dataset_prep[i]
         choices = sample["answers"]
         correct_choice = sample["correct_answer"]
