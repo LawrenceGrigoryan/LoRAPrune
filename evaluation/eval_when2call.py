@@ -104,6 +104,7 @@ def main(base_model: str = "",
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
+    # FIXME: batched
     result = []
     for i in tqdm(range(len(dataset_prep))):
         sample = dataset_prep[i]
