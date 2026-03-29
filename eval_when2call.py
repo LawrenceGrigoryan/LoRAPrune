@@ -1,4 +1,5 @@
 from typing import List
+import os
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
@@ -6,7 +7,6 @@ from loguru import logger
 import fire
 import torch
 import json
-import numpy as np
 from peft.utils.save_and_load import load_peft_weights
 from tqdm import tqdm
 
@@ -118,6 +118,7 @@ def main(base_model: str = "",
         predicted_choice = max(answer_loglikelihoods, key=lambda x: answer_loglikelihoods.get(x))
         result.append({"gold": correct_choice, "predicted": predicted_choice})
 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
         for item in result:
             f.write(json.dumps(item) + "\n")
