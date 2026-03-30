@@ -116,7 +116,7 @@ def main(base_model: str = "",
         for type, choice in choices.items():
             prompt = f"{sample['prompt']} {choice}{tokenizer.eos_token}"
             ll = compute_loglikelihood(prompt, model, tokenizer)
-            answer_loglikelihoods[type] = ll
+            answer_loglikelihoods[type] = ll / len(tokenizer(prompt).input_ids)
         predicted_choice = max(answer_loglikelihoods, key=lambda x: answer_loglikelihoods.get(x))
         result.append({"gold": correct_choice, "predicted": predicted_choice})
 
