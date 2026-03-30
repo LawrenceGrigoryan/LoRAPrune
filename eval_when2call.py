@@ -98,11 +98,11 @@ def main(base_model: str = "",
     model.half()  # seems to fix bugs for some users.
 
     # MCQ - multiple choice question evaluation, llm as a judge possible as well
-    eval_dataset = load_dataset("nvidia/When2Call", "test")
+    eval_dataset = load_dataset(f"{os.getenv('HF_DATASETS_CACHE')}/nvidia___when2_call", split="test")
     if model_type == "qwen2":
-        dataset_prep = process_docs_qwen2_5(eval_dataset["mcq"])
+        dataset_prep = process_docs_qwen2_5(eval_dataset)
     elif model_type == "llama":
-        dataset_prep = process_docs_llama3_2(eval_dataset["mcq"])
+        dataset_prep = process_docs_llama3_2(eval_dataset)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -125,6 +125,9 @@ def main(base_model: str = "",
         for item in result:
             f.write(json.dumps(item) + "\n")
 
+    acc = sum([item["gold"] == item["predicted"] for item in result]) / len(result)
+    logger.info(f"Accuracy: {acc:.4f}")
+    
 
 if __name__ == "__main__":
     fire.Fire(main)
