@@ -32,7 +32,7 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
     )
     # BOS token added always
     result["input_ids"] = [tokenizer.bos_token_id] + result["input_ids"]
-    result["attention_mask"].append(1)
+    result["attention_mask"] = [1] + result["attention_mask"]
     
     if (
         result["input_ids"][-1] != tokenizer.eos_token_id
@@ -65,11 +65,14 @@ def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, cut
         tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False)
         user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
-        tokenized_full_prompt["labels"] = [
-            -100
-        ] * user_prompt_len + tokenized_full_prompt["labels"][
-            user_prompt_len:
-        ]  # could be sped up, probably
+        # could be sped up, probably
+        response_labels = tokenized_full_prompt["labels"][user_prompt_len:]
+        if len(response_labels) == 0:
+            # instruction fills the entire context — no response tokens to train on;
+            # fall back to training on all tokens to avoid an all-masked batch (NaN loss)
+            pass
+        else:
+            tokenized_full_prompt["labels"] = [-100] * user_prompt_len + response_labels
     else:
         full_prompt = data_point["text"]
         tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=True)
