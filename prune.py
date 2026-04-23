@@ -67,7 +67,7 @@ def train(
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     fp16: bool = True,  # whether to use mixed precision training
 ):
-    print(
+    logger.info(
         f"Pruning with params:\n"
         f"base_model: {base_model}\n"
         f"data_path: {data_path}\n"
@@ -183,7 +183,6 @@ def train(
     freeze(model)
     model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
 
-    # utils.print_trainable_parameters(model)
     generate_and_tokenize_prompt_partial = partial(
         generate_and_tokenize_prompt, train_on_inputs=train_on_inputs, cutoff_len=cutoff_len, tokenizer=tokenizer
     )
