@@ -313,22 +313,19 @@ class LoRAPruneTrainer(Trainer):
                     if args.max_grad_norm is not None and args.max_grad_norm > 0 and not self.deepspeed:
                         # deepspeed does its own clipping
 
-                        # AMP: gradients need unscaling
-                        # self.scaler.unscale_(self.optimizer)
-
                         if is_sagemaker_mp_enabled() and args.fp16:
                             grad_norm = self.optimizer.clip_master_grads(args.max_grad_norm)
-                        elif hasattr(self.optimizer, "clip_grad_norm"):
-                            # Some optimizers (like the sharded optimizer) have a specific way to do gradient clipping
-                            grad_norm = self.optimizer.clip_grad_norm(args.max_grad_norm)
-                        elif hasattr(model, "clip_grad_norm_"):
-                            # Some models (like FullyShardedDDP) have a specific way to do gradient clipping
-                            grad_norm = model.clip_grad_norm_(args.max_grad_norm)
-                        else:
-                            # Revert to normal clipping otherwise, handling Apex or full precision
+                        elif self.use_apex:
                             grad_norm = nn.utils.clip_grad_norm_(
-                                amp.master_params(self.optimizer) if self.use_apex else model.parameters(),
-                                args.max_grad_norm,
+                                amp.master_params(self.optimizer), args.max_grad_norm
+                            )
+                        else:
+                            # accelerator.clip_grad_norm_ unscales AMP-scaled gradients before
+                            # clipping, so the reported norm and the actual clip are both in
+                            # true (unscaled) gradient space.  The old nn.utils.clip_grad_norm_
+                            # path clipped scaled gradients, making max_grad_norm effectively ~0.
+                            grad_norm = self.accelerator.clip_grad_norm_(
+                                model.parameters(), args.max_grad_norm
                             )
 
                     # Optimizer step
