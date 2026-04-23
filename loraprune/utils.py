@@ -61,7 +61,9 @@ def update_sensitivity_dict(model, s_dict, pruning_type):
             s_all[group_name] += s
 
     for group_name, imp in s_all.items():
-        if torch.isnan(imp.sum()):
+        if torch.isnan(imp.sum()) or torch.isinf(imp.sum()):
+            import warnings
+            warnings.warn(f"NaN/inf sensitivity detected for group '{group_name}', skipping sensitivity update for this step.")
             return s_dict
 
     for group_name, imp in s_dict.items():
@@ -75,6 +77,14 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
     if prune_metric == 'lora':
         grad_a = layer.lora_A.weight.grad
         grad_b = layer.lora_B.weight.grad
+        # Gradients can be None (parameter not in graph) or inf/nan (fp16 overflow).
+        # In both cases treat as zero contribution to sensitivity for this step.
+        if grad_a is None:
+            grad_a = torch.zeros_like(a)
+        if grad_b is None:
+            grad_b = torch.zeros_like(b)
+        grad_a = torch.nan_to_num(grad_a, nan=0.0, posinf=0.0, neginf=0.0)
+        grad_b = torch.nan_to_num(grad_b, nan=0.0, posinf=0.0, neginf=0.0)
         grad = (grad_b @ a + b @ grad_a - grad_b @ grad_a)
     elif prune_metric == 'magnitude':
         grad = 1
