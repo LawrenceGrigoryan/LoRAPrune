@@ -120,7 +120,7 @@ def train(
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         # load_in_8bit=load_in_8bit,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,
         device_map=device_map,
     )
     # infer model type for tokenization and other stuff
