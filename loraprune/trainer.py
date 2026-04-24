@@ -29,6 +29,26 @@ if is_apex_available():
 
 parsed_torch_version_base = version.parse(version.parse(torch.__version__).base_version)
 
+
+def _diagnose_tensors(model, tag: str, step: int) -> None:
+    """Log the first layer whose weights or gradients contain nan/inf."""
+    bad_weights, bad_grads = [], []
+    for name, param in model.named_parameters():
+        if not torch.isfinite(param.data).all():
+            bad_weights.append(
+                f"{name}: max={param.data.abs().max().item():.3e}"
+            )
+        if param.grad is not None and not torch.isfinite(param.grad).all():
+            bad_grads.append(
+                f"{name}: max={param.grad.abs().max().item():.3e}"
+            )
+    if bad_weights:
+        logger.info(f"[{tag} step={step}] NAN/INF WEIGHTS ({len(bad_weights)}): {bad_weights[:5]}")
+    if bad_grads:
+        logger.info(f"[{tag} step={step}] NAN/INF GRADS ({len(bad_grads)}): {bad_grads[:5]}")
+    if not bad_weights and not bad_grads:
+        logger.info(f"[{tag} step={step}] all weights and grads finite")
+
 is_torch_less_than_1_11 = parsed_torch_version_base < version.parse("1.11")
 logger = logging.get_logger(__name__)
 
@@ -288,6 +308,12 @@ class LoRAPruneTrainer(Trainer):
 
                 tr_loss_step = self.training_step(model, inputs)
 
+                # ── diagnostic: catch first bad loss ──────────────────────────
+                _gs = self.state.global_step
+                if not torch.isfinite(tr_loss_step):
+                    logger.info(f"[DIAG step={_gs}] loss={tr_loss_step.item():.6g}  ← NAN/INF LOSS detected")
+                    _diagnose_tensors(model, "after-backward", _gs)
+
                 if (
                     args.logging_nan_inf_filter
                     and not is_torch_xla_available()
@@ -309,6 +335,22 @@ class LoRAPruneTrainer(Trainer):
                     steps_in_epoch <= args.gradient_accumulation_steps
                     and (step + 1) == steps_in_epoch
                 ):
+                    # ── diagnostic: pre-clip gradient health ─────────────────
+                    _gs = self.state.global_step
+                    _bad = [(n, p.grad.abs().max().item())
+                            for n, p in model.named_parameters()
+                            if p.grad is not None and not torch.isfinite(p.grad).all()]
+                    if _bad:
+                        logger.info(f"[DIAG step={_gs}] PRE-CLIP bad grads ({len(_bad)}): "
+                              + ", ".join(f"{n}:{v:.3e}" for n, v in _bad[:5]))
+                    else:
+                        # log overall norm every 50 steps so we can see it building up
+                        if _gs % 50 == 0:
+                            _norm = sum(p.grad.norm().item()**2
+                                        for _, p in model.named_parameters()
+                                        if p.grad is not None) ** 0.5
+                            logger.info(f"[DIAG step={_gs}] pre-clip grad norm={_norm:.4f}")
+
                     # Gradient clipping
                     if args.max_grad_norm is not None and args.max_grad_norm > 0 and not self.deepspeed:
                         # deepspeed does its own clipping
@@ -346,6 +388,14 @@ class LoRAPruneTrainer(Trainer):
 
                     if optimizer_was_run and not self.deepspeed:
                         self.lr_scheduler.step()
+
+                    # ── diagnostic: post-optimizer weight health ──────────────
+                    _bad_w = [(n, p.data.abs().max().item())
+                              for n, p in model.named_parameters()
+                              if not torch.isfinite(p.data).all()]
+                    if _bad_w:
+                        logger.info(f"[DIAG step={_gs}] POST-STEP bad weights ({len(_bad_w)}): "
+                              + ", ".join(f"{n}:{v:.3e}" for n, v in _bad_w[:5]))
 
                     model.zero_grad()
                     self.state.global_step += 1
