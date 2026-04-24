@@ -25,6 +25,7 @@ from packaging import version
 import shutil
 
 if is_apex_available():
+    logger.info("Apex is available. Using Apex for mixed precision training.")
     from apex import amp
 
 parsed_torch_version_base = version.parse(version.parse(torch.__version__).base_version)
