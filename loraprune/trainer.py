@@ -23,6 +23,8 @@ from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
 import os
 from packaging import version
 import shutil
+from loguru import logger
+
 
 if is_apex_available():
     logger.info("Apex is available. Using Apex for mixed precision training.")
