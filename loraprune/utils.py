@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from .lora import Linear
+from loguru import logger
 
 pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
                   'mlp': ['up_proj', 'gate_proj'],
@@ -155,7 +156,7 @@ def prune_one_layer(layer):
 
 def prune(model):
     for layer_id, layer in enumerate(model.model.model.layers):
-        print("pruning layer {}".format(layer_id))
+        logger.info("pruning layer {}".format(layer_id))
         prune_one_layer(layer)
 
 def local_prune(model, s_dict, ratio, target_ratio):
@@ -202,7 +203,7 @@ def local_prune(model, s_dict, ratio, target_ratio):
         else:
             if hasattr(module, 'weight'):
                 original_param_num += np.prod(module.weight.shape)
-    print("pruned/original parameters number:{:3f}/{:3f}  ratio:{:3f}".format(pruned_param_num*1e-9,
+    logger.info("pruned/original parameters number:{:3f}/{:3f}  ratio:{:3f}".format(pruned_param_num*1e-9,
                                                                                original_param_num*1e-9,
                                                                                pruned_param_num/original_param_num))
 
@@ -235,4 +236,4 @@ def print_trainable_parameters(model):
         if p.requires_grad:
             trainable_params += p.numel()
         total_params += p.numel()
-    print("total params:{}   trainable params:{}    ratio:{}".format(total_params * 1e-6, trainable_params * 1e-6, trainable_params / total_params))
+    logger.info("total params:{}   trainable params:{}    ratio:{}".format(total_params * 1e-6, trainable_params * 1e-6, trainable_params / total_params))
