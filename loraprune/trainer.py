@@ -376,6 +376,8 @@ class LoRAPruneTrainer(Trainer):
                             grad_norm = self.accelerator.clip_grad_norm_(
                                 model.parameters(), args.max_grad_norm
                             )
+                    else:
+                        grad_norm = None
 
                     # Optimizer step
                     if not self.deepspeed:
