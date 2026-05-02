@@ -1,4 +1,5 @@
 from transformers import AutoTokenizer
+from loguru import logger
 
 
 def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str) -> None:
@@ -61,19 +62,34 @@ def generate_sft_sample(data_point):
 
 def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, model_type: str, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
-        tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True)
-        user_prompt = generate_sft_sample({**data_point, "response": ""})
-        tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False)
-        user_prompt_len = len(tokenized_user_prompt["input_ids"])
+        if model_type == "qwen2":
+            prompt = data_point["instruction"]
+            assistant_response = data_point["response"]
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": assistant_response}
+            ]
+            full_prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len-1, add_eos_token=False)
+            assistant_bos = "<|im_start|>assistant\n"
+            user_prompt = full_prompt[:full_prompt.rfind(assistant_bos) + len(assistant_bos)]
+            tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False)
+            user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
-        # could be sped up, probably
-        response_labels = tokenized_full_prompt["labels"][user_prompt_len:]
-        if len(response_labels) == 0:
-            # instruction fills the entire context — no response tokens to train on;
-            # fall back to training on all tokens to avoid an all-masked batch (NaN loss)
-            pass
+            # could be sped up, probably
+            response_labels = tokenized_full_prompt["labels"][user_prompt_len:]
+            if len(response_labels) == 0:
+                logger.warning(f"No response tokens - omitting the sample, cutoff_len={cutoff_len}")
+                return {"input_ids": None, "attention_mask": None, "labels": None}
+            else:
+                tokenized_full_prompt["labels"] = [-100] * user_prompt_len + response_labels
         else:
-            tokenized_full_prompt["labels"] = [-100] * user_prompt_len + response_labels
+            raise NotImplementedError(f"SFT Tokenization not implemented for model type: {model_type}")
     elif train_on_inputs:
         # no bos token for qwen1.5/qwen2 base models 
         if model_type == "qwen2":

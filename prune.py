@@ -191,13 +191,21 @@ def train(
             train_size=train_set_size, test_size=val_set_size, shuffle=True, seed=42
         )
         train_data = (
-            train_val["train"].shuffle().map(generate_and_tokenize_prompt_partial)
+            train_val["train"].shuffle()
+            .map(generate_and_tokenize_prompt_partial)
+            .filter(lambda x: x["input_ids"] is not None)
         )
         val_data = (
-            train_val["test"].shuffle().map(generate_and_tokenize_prompt_partial)
+            train_val["test"].shuffle()
+            .map(generate_and_tokenize_prompt_partial)
+            .filter(lambda x: x["input_ids"] is not None)
         )
     else:
-        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt_partial)
+        train_data = (
+            data["train"].shuffle()
+            .map(generate_and_tokenize_prompt_partial)
+            .filter(lambda x: x["input_ids"] is not None)
+        )
         val_data = None
 
     trainer = LoRAPruneTrainer(
