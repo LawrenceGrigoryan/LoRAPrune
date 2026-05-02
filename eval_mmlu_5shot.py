@@ -28,6 +28,7 @@ def eval_mmlu(model_id: str, adapter_id: str = None, n_shot: int = 5, batch_size
         model_id,
         load_in_8bit=False,
         device_map=device,
+        torch_dtype=torch.float16,
     )
     tokenizer = AutoTokenizer.from_pretrained(adapter_id or model_id)
     
@@ -50,9 +51,6 @@ def eval_mmlu(model_id: str, adapter_id: str = None, n_shot: int = 5, batch_size
             if 'lora_mask' in name:
                 adapters_weights[name] = param.reshape(-1)
         model.load_state_dict(adapters_weights, strict=False)
-        
-        total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Total parameters before pruning: {total_params}")
         
         freeze(model)
         prune_from_checkpoint(model)
@@ -78,7 +76,7 @@ def eval_mmlu(model_id: str, adapter_id: str = None, n_shot: int = 5, batch_size
 
     # overall MMLU average
     accs = [m["acc,none"] for m in results["results"].values()]
-    logger.info(f"\nMMLU avg: {np.mean(accs):.4f}")
+    logger.info(f"MMLU avg: {np.mean(accs):.4f}")
 
 
 if __name__ == "__main__":

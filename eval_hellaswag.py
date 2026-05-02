@@ -23,11 +23,12 @@ except:
     pass
 
 
-def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 1, batch_size: int = 8, limit: int = 10) -> None:
+def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 0, batch_size: int = 8, limit: int = 10) -> None:
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         load_in_8bit=False,
         device_map=device,
+        torch_dtype=torch.float16,
     )
     tokenizer = AutoTokenizer.from_pretrained(adapter_id or model_id)
     
@@ -50,10 +51,7 @@ def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 1, batch
             if 'lora_mask' in name:
                 adapters_weights[name] = param.reshape(-1)
         model.load_state_dict(adapters_weights, strict=False)
-        
-        total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Total parameters before pruning: {total_params}")
-        
+
         freeze(model)
         prune_from_checkpoint(model)
 
@@ -78,7 +76,7 @@ def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 1, batch
 
     # overall MMLU average
     accs = [m["acc,none"] for m in results["results"].values()]
-    logger.info(f"\HellaSwag avg: {np.mean(accs):.4f}")
+    logger.info(f"HellaSwag avg: {np.mean(accs):.4f}")
 
 
 if __name__ == "__main__":
