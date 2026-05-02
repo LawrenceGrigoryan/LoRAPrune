@@ -175,16 +175,16 @@ def train(
 
     # c4 is too big to load into memory, so we save a smaller random sample
     try:
-        data = load_dataset(data_path)
+        data = load_from_disk(data_path)
     except Exception as e:
         logger.warning(f"Error occurred while loading dataset: {e}")
-        data = load_from_disk(data_path)
+        data = load_dataset(data_path)
 
     freeze(model)
     model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
 
     generate_and_tokenize_prompt_partial = partial(
-        generate_and_tokenize_prompt, train_on_inputs=train_on_inputs, cutoff_len=cutoff_len, tokenizer=tokenizer
+        generate_and_tokenize_prompt, model_type=model_type, train_on_inputs=train_on_inputs, cutoff_len=cutoff_len, tokenizer=tokenizer
     )
     if val_set_size > 0:
         train_val = data["train"].train_test_split(
