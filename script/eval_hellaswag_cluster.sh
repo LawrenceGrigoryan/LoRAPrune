@@ -10,5 +10,4 @@ srun python eval_hellaswag.py \
     --model_id "./models/Qwen_Qwen1.5-0.5B" \
     --adapter_id "./outputs_dir/qwen15-05b-c4-10k/" \
     --n_shot 0 \
-    --batch_size 8 \
-    --limit None
+    --batch_size 8
