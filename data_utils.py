@@ -18,7 +18,7 @@ def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str) -> None:
         raise ValueError(f"Unsupported model type `{model_type}`!")
 
 
-def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_token: bool = True, **kwargs):
+def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_bos_token: bool = False, add_eos_token: bool = True, **kwargs):
     # there's probably a way to do this with the tokenizer settings
     # but again, gotta move fast
     result = tokenizer(
@@ -31,8 +31,9 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_eos_tok
         **kwargs,
     )
     # BOS token added always
-    result["input_ids"] = [tokenizer.bos_token_id] + result["input_ids"]
-    result["attention_mask"] = [1] + result["attention_mask"]
+    if add_bos_token:
+        result["input_ids"] = [tokenizer.bos_token_id] + result["input_ids"]
+        result["attention_mask"] = [1] + result["attention_mask"]
     
     if (
         result["input_ids"][-1] != tokenizer.eos_token_id
@@ -58,7 +59,7 @@ def generate_sft_sample(data_point):
 {data_point["response"]}"""
 
 
-def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, cutoff_len: int, train_on_inputs: bool):
+def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, model_type: str, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
         tokenized_full_prompt = tokenize(generate_sft_sample(data_point), tokenizer, cutoff_len=cutoff_len-1, add_eos_token=True)
         user_prompt = generate_sft_sample({**data_point, "response": ""})
@@ -73,7 +74,12 @@ def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, cut
             pass
         else:
             tokenized_full_prompt["labels"] = [-100] * user_prompt_len + response_labels
-    else:
-        full_prompt = data_point["text"]
-        tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=True)
+    elif train_on_inputs:
+        # no bos token for qwen1.5/qwen2 base models 
+        if model_type == "qwen2":
+            full_prompt = data_point["text"]
+            tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_bos_token=False, add_eos_token=True)
+        else:
+            full_prompt = data_point["text"]
+            tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_bos_token=True, add_eos_token=True)
     return tokenized_full_prompt
