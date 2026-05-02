@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-N_RANDOM_SAMPLES = 50_000
+N_RANDOM_SAMPLES = 120_000
 BUFFER_SIZE = 1_000_000
 
 dataset = load_dataset(
