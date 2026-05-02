@@ -23,7 +23,7 @@ except:
     pass
 
 
-def eval_mmlu(model_id: str, adapter_id: str = None, n_shot: int = 5, batch_size: int = 8, limit: int = 10) -> None:
+def eval_mmlu(model_id: str, adapter_id: str = None, n_shot: int = 5, batch_size: int = 8, limit: int = None) -> None:
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         load_in_8bit=False,

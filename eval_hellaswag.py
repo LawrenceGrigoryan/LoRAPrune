@@ -23,7 +23,7 @@ except:
     pass
 
 
-def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 0, batch_size: int = 8, limit: int = 10) -> None:
+def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 0, batch_size: int = 8, limit: int = None) -> None:
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         load_in_8bit=False,
@@ -70,12 +70,10 @@ def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 0, batch
         limit=limit,
     )
 
-    # per-subtask accuracy
     for task, metrics in results["results"].items():
-        logger.info(f"{task}: {metrics['acc,none']:.4f}")
+        logger.info(f"{task}: {metrics['acc_norm,none']:.4f}")
 
-    # overall MMLU average
-    accs = [m["acc,none"] for m in results["results"].values()]
+    accs = [m["acc_norm,none"] for m in results["results"].values()]
     logger.info(f"HellaSwag avg: {np.mean(accs):.4f}")
 
 

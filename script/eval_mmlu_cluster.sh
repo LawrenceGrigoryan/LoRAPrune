@@ -6,10 +6,9 @@
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
 
-srun python eval_mmlu.py \
-    --base_model "./models/Qwen_Qwen1.5-0.5B" \
-    --lora_weights "./outputs_dir/qwen15-05b-c4-10k/" \
-    --lora_r 8 \
-    --lora_alpha 16 \
-    --lora_dropout 0.0 \
-    --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj" \
+srun python eval_mmlu_5shot.py \
+    --model_id "./models/Qwen_Qwen1.5-0.5B" \
+    --adapter_id "./outputs_dir/qwen15-05b-c4-10k/" \
+    --n_shot 5 \
+    --batch_size 8 \
+    --limit None
