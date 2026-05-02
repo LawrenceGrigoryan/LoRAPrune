@@ -224,8 +224,7 @@ def train(
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else None,
             run_name=wandb_run_name if use_wandb else None,
-            # max_grad_norm=1.0,  # avoid exploding grads
-            max_grad_norm=None,
+            max_grad_norm=1.0,  # avoid exploding grads
         ),
         # we already created labels, so this collator is just for padding - no need to worry about ignoring pad tokens
         data_collator=DataCollatorForSeq2Seq(
