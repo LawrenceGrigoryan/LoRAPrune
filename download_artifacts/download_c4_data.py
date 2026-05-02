@@ -25,4 +25,4 @@ for i, example in enumerate(dataset["train"]):
 
 dataset_small = DatasetDict({"train": Dataset.from_list(samples)})
 
-dataset_small.save_to_disk("./data/allenai___c4")
+dataset_small.save_to_disk("./data/allenai___c4_120k")

@@ -13,7 +13,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
-from data_utils import prepare_tokenizer
+from loraprune.data_utils import prepare_tokenizer
 
 if torch.cuda.is_available():
     device = "cuda"

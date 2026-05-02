@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
-from data_utils import prepare_tokenizer
+from loraprune.data_utils import prepare_tokenizer
 from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
 from evaluation.utils import compute_loglikelihood
 

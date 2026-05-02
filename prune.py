@@ -11,7 +11,7 @@ from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze
 from loraprune.lora import LoraConfig
 from loraprune.peft_model import get_peft_model
-from data_utils import prepare_tokenizer, generate_and_tokenize_prompt
+from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt
 from loguru import logger
 from safetensors.torch import save_file as safe_save_file
 
