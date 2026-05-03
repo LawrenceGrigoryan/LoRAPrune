@@ -112,12 +112,12 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
         limit=limit,
     )
 
-    named_results = [("mmlu", mmlu_res), ("hellaswag", hellaswag_res), ("winogrande", wino_res)]
+    named_results = [("mmlu", mmlu_res, "acc,none"), ("hellaswag", hellaswag_res, "acc_norm,none"), ("winogrande", wino_res, "acc_norm,none")]
     output = {}
-    for name, result in named_results:
+    for name, result, metric_key in named_results:
         task_accs = {}
         for task, metrics in result["results"].items():
-            acc = metrics["acc,none"]
+            acc = metrics[metric_key]
             task_accs[task] = acc
             logger.info(f"{task}: {acc:.4f}")
         avg = float(np.mean(list(task_accs.values())))
