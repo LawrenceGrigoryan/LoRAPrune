@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=loraprune_qwen1.5-0.5b-hellaswag
-#SBATCH --output=loraprune_qwen1.5-0.5b-hellaswag%j.log
-#SBATCH --error=loraprune_qwen1.5-0.5b-hellaswag%j.err
+#SBATCH --output=./logs/loraprune_qwen1.5-0.5b-hellaswag%j.log
+#SBATCH --error=./logs/loraprune_qwen1.5-0.5b-hellaswag%j.err
 #SBATCH --mail-user=REPLACE_USER_NAME@uni-hildesheim.de
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
+
+export HF_DATASETS_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_CACHE="./data/"
 
 srun python eval_hellaswag.py \
     --model_id "./models/Qwen_Qwen1.5-0.5B" \
