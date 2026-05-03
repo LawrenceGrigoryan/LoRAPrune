@@ -112,7 +112,7 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
         limit=limit,
     )
 
-    named_results = [("mmlu", mmlu_res, "acc,none"), ("hellaswag", hellaswag_res, "acc_norm,none"), ("winogrande", wino_res, "acc_norm,none")]
+    named_results = [("mmlu", mmlu_res, "acc,none"), ("hellaswag", hellaswag_res, "acc_norm,none"), ("winogrande", wino_res, "acc,none")]
     output = {}
     for name, result, metric_key in named_results:
         task_accs = {}
