@@ -15,4 +15,4 @@ srun python eval_commonsense.py \
     # --adapter_id "./outputs_dir/qwen15-05b-c4-100k/" \
     --n_shot 5 \
     --batch_size 8 \
-    --output_dir "../evaluation/"
+    --output_dir "../output_dir/evaluation/results/"
