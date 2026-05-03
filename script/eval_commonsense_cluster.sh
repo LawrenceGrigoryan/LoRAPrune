@@ -10,7 +10,7 @@ export HF_DATASETS_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_CACHE="./data/benchmarks/"
 
-srun python eval_commonsense.py \
+srun python ./evaluation/eval_commonsense.py \
     --model_id "./models/Qwen_Qwen1.5-0.5B" \
     # --adapter_id "./outputs_dir/qwen15-05b-c4-100k/" \
     --batch_size 8 \

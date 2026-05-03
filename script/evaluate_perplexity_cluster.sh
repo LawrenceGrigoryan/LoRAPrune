@@ -6,7 +6,7 @@
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
 
-srun python eval_perplexity.py \
+srun python ./evaluation/eval_perplexity.py \
     --base_model "./models/meta-llama_Llama-3.2-1B" \
     --lora_weights 'outputs_dir' \
     --cutoff_len 512 \
