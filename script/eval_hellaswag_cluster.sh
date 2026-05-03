@@ -8,7 +8,7 @@
 
 export HF_DATASETS_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
-export HF_DATASETS_CACHE="./data/"
+export HF_DATASETS_CACHE="./data/benchmarks/"
 
 srun python eval_hellaswag.py \
     --model_id "./models/Qwen_Qwen1.5-0.5B" \
