@@ -51,6 +51,7 @@ def eval_hellaswag(model_id: str, adapter_id: str = None, n_shot: int = 0, batch
             if 'lora_mask' in name:
                 adapters_weights[name] = param.reshape(-1)
         model.load_state_dict(adapters_weights, strict=False)
+        model.to(device)
 
         freeze(model)
         prune_from_checkpoint(model)
