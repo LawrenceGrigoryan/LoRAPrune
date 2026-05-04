@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=loraprune_qwen1.5-0.5b-eval-instruction
-#SBATCH --output=./logs/loraprune_qwen1.5-0.5b-eval-instruction-%j.log
-#SBATCH --error=./logs/loraprune_qwen1.5-0.5b-eval-instruction-%j.err
+#SBATCH --job-name=loraprune_qwen1.5-0.5b-chat-eval-instruction
+#SBATCH --output=./logs/loraprune_qwen1.5-0.5b-chat-eval-instruction-%j.log
+#SBATCH --error=./logs/loraprune_qwen1.5-0.5b-chat-eval-instruction-%j.err
 #SBATCH --mail-user=REPLACE_USER_NAME@uni-hildesheim.de
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
