@@ -12,3 +12,6 @@ sentencepiece==0.2.0
 gradio==5.8.0
 lm-format-enforcer==0.10.9
 protobuf==5.29.1
+lm_eval==0.4.11
+langdetect==1.0.9
+immutabledict==4.3.1
