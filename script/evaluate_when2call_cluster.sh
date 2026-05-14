@@ -13,4 +13,4 @@ srun python eval_when2call.py \
     --lora_alpha 16 \
     --lora_dropout 0.0 \
     --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj" \
-    --output_path "./outputs_dir/evaluation/results"
+    --output_dir "./outputs_dir/evaluation/results"

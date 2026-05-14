@@ -43,8 +43,7 @@ def main(base_model: str = "",
                 "up_proj"
             ],
         lora_weights: str | None = None,
-        output_path: str = "./when2call_results.jsonl",
-    ):
+        output_dir: str = "./outputs_dir/evaluation/results/") -> None:
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
@@ -120,8 +119,10 @@ def main(base_model: str = "",
         predicted_choice = max(answer_loglikelihoods, key=lambda x: answer_loglikelihoods.get(x))
         result.append({"gold": correct_choice, "predicted": predicted_choice})
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as f:
+    adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else "base"
+    save_path = os.path.join(output_dir, adapter_name, "commonsense.json")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    with open(save_path, "w") as f:
         for item in result:
             f.write(json.dumps(item) + "\n")
 
