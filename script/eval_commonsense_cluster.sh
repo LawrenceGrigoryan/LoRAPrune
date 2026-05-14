@@ -14,4 +14,4 @@ srun python eval_commonsense.py \
     --model_id "./models/Qwen_Qwen1.5-0.5B" \
     # --adapter_id "./outputs_dir/qwen15-05b-c4-80k/" \
     --batch_size 8 \
-    --output_dir "../output_dir/evaluation/results/"
+    --output_dir "./output_dir/evaluation/results/"
