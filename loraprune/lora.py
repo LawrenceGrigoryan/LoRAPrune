@@ -30,7 +30,7 @@ from peft.utils import transpose
 
 
 @dataclass
-class CustomLoraConfig(CustomLoraConfig):
+class CustomLoraConfig(LoraConfig):
     """
     This is the configuration class to store the configuration of a [`~peft.Lora`].
 
