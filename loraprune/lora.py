@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
-from peft import CustomLoraConfig
+from peft import LoraConfig
 
 from peft.utils import transpose
 
