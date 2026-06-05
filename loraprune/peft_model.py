@@ -11,7 +11,10 @@ class LoraPeftModelForCausalLM(PeftModelForCausalLM):
 
     @property
     def active_peft_config(self):
-        return self.peft_config[self.active_adapter]
+        peft_config = self.peft_config
+        if isinstance(peft_config, dict):
+            return peft_config[self.active_adapter]
+        return peft_config
 
 
 def get_peft_model(model, peft_config):
