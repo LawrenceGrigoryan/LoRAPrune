@@ -90,8 +90,14 @@ def train(
         f"wandb_run_name: {wandb_run_name}\n"
         f"wandb_watch: {wandb_watch}\n"
         f"wandb_log_model: {wandb_log_model}\n"
+        f"ratio: {ratio}\n"
+        f"init_ratio: {init_ratio}\n"
+        f"warmup_iters: {warmup_iters}\n"
+        f"cooldown_iters: {cooldown_iters}\n"
+        f"prune_freq: {prune_freq}\n"
+        f"prune_metric: {prune_metric}\n"
         f"resume_from_checkpoint: {resume_from_checkpoint}\n"
-        f"prune_metric: {resume_from_checkpoint}\n"
+        f"fp16: {fp16}\n"
     )
     assert (
         base_model
@@ -234,6 +240,7 @@ def train(
             report_to="wandb" if use_wandb else None,
             run_name=wandb_run_name if use_wandb else None,
             max_grad_norm=1.0,  # avoid exploding grads
+            label_names=["labels"],
         ),
         # we already created labels, so this collator is just for padding - no need to worry about ignoring pad tokens
         data_collator=DataCollatorForSeq2Seq(
