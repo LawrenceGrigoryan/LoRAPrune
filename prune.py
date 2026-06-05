@@ -9,7 +9,7 @@ from transformers import DataCollatorForSeq2Seq
 from datasets import load_dataset, load_from_disk
 from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze
-from loraprune.lora import LoraConfig
+from loraprune.lora import CustomLoraConfig
 from loraprune.peft_model import get_peft_model
 from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt
 from loguru import logger
@@ -161,7 +161,7 @@ def train(
 
     # TODO: convert sparseLinear for model here
     # utils.convert_sparse_network(model, target_modules=lora_target_modules)
-    config = LoraConfig(
+    config = CustomLoraConfig(
         r=lora_r,
         lora_alpha=lora_alpha,
         target_modules=lora_target_modules,

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
-from loraprune.lora import LoraConfig
+from loraprune.lora import CustomLoraConfig
 from loraprune.data_utils import prepare_tokenizer
 from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
 from evaluation.utils import compute_loglikelihood
@@ -64,7 +64,7 @@ def main(base_model: str = "",
     if lora_weights:
         prepare_tokenizer(tokenizer, model_type)
 
-        config = LoraConfig(
+        config = CustomLoraConfig(
             r=lora_r,
             lora_alpha=lora_alpha,
             target_modules=lora_target_modules,

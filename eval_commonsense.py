@@ -11,7 +11,7 @@ from lm_eval.models.huggingface import HFLM
 
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
-from loraprune.lora import LoraConfig
+from loraprune.lora import CustomLoraConfig
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -60,7 +60,7 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
     logger.info(f"Total parameters before pruning: {total_params}")
     
     if adapter_id:
-        config = LoraConfig(
+        config = CustomLoraConfig(
             r=8,
             lora_alpha=16,
             target_modules="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj".split(","),

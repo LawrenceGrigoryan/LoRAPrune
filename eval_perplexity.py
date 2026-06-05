@@ -12,7 +12,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
-from loraprune.lora import LoraConfig
+from loraprune.lora import CustomLoraConfig
 from loraprune.data_utils import prepare_tokenizer
 
 if torch.cuda.is_available():
@@ -70,7 +70,7 @@ def main(
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total model parameters: {total_params}")
     if lora_weights:
-        config = LoraConfig(
+        config = CustomLoraConfig(
             r=lora_r,
             lora_alpha=lora_alpha,
             target_modules=lora_target_modules,
