@@ -23,10 +23,13 @@ import peft
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from loguru import logger
 from transformers.pytorch_utils import Conv1D
 from peft import LoraConfig
 
 from peft.utils import transpose
+
+_lora_overflow_warned = set()  # track which layers already warned to avoid log spam
 
 
 @dataclass
@@ -303,8 +306,19 @@ class Linear(nn.Linear, LoraLayer):
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
-                # Ensure consistent data types
-                lora_output = self.lora_B(self.lora_A(self.lora_dropout(x).to(self.lora_A.weight.dtype))) * self.scaling
+                lora_input = self.lora_dropout(x).float()
+                lora_output = self.lora_B(self.lora_A(lora_input)) * self.scaling
+                if not torch.isfinite(lora_output).all():
+                    layer_id = id(self)
+                    if layer_id not in _lora_overflow_warned:
+                        _lora_overflow_warned.add(layer_id)
+                        logger.warning(
+                            f"[lora overflow] NaN/inf in lora_output | "
+                            f"x: {x.abs().max():.3e} dtype={x.dtype} | "
+                            f"lora_A max: {self.lora_A.weight.data.abs().max():.3e} | "
+                            f"lora_B max: {self.lora_B.weight.data.abs().max():.3e} | "
+                            f"scaling: {self.scaling:.4f}"
+                        )
                 result += lora_output.to(result.dtype)
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
