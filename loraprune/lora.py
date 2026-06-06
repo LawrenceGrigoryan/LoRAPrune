@@ -266,7 +266,7 @@ class Linear(nn.Linear, LoraLayer):
             nn.init.zeros_(self.lora_B.weight)
 
     def train(self, mode: bool = True):
-        """ 
+        """
         Sets the module in training mode
         """
         nn.Linear.train(self, mode)
@@ -286,6 +286,7 @@ class Linear(nn.Linear, LoraLayer):
                     transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
                 )
             self.merged = False
+        return self
 
     def eval(self):
         """ 
@@ -307,7 +308,10 @@ class Linear(nn.Linear, LoraLayer):
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 lora_input = self.lora_dropout(x).float()
-                lora_output = self.lora_B(self.lora_A(lora_input)) * self.scaling
+                lora_output = (
+                    F.linear(F.linear(lora_input, self.lora_A.weight.float()),
+                             self.lora_B.weight.float())
+                ) * self.scaling
                 if not torch.isfinite(lora_output).all():
                     layer_id = id(self)
                     if layer_id not in _lora_overflow_warned:
