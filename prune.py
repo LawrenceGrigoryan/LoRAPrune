@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List
 from functools import partial
 
@@ -67,6 +68,7 @@ def train(
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     fp16: bool = True,  # whether to use mixed precision training
 ):
+    train_params = {k: v for k, v in locals().items() if not callable(v)}
     logger.info(
         f"Pruning with params:\n"
         f"base_model: {base_model}\n"
@@ -267,6 +269,8 @@ def train(
     os.makedirs(output_dir, exist_ok=True)
     safe_save_file(lora_state_dict, os.path.join(output_dir, ADAPTER_WEIGHTS_NAME))
     config.save_pretrained(output_dir)
+    with open(os.path.join(output_dir, "train_params.json"), "w") as f:
+        json.dump(train_params, f, indent=2)
     tokenizer.save_pretrained(output_dir)
 
 if __name__ == "__main__":
