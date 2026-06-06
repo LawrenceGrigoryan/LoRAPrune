@@ -307,22 +307,10 @@ class Linear(nn.Linear, LoraLayer):
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
-                lora_input = self.lora_dropout(x).float()
+                lora_input = self.lora_dropout(x)
                 lora_output = (
-                    F.linear(F.linear(lora_input, self.lora_A.weight.float()),
-                             self.lora_B.weight.float())
+                    F.linear(F.linear(lora_input, self.lora_A.weight), self.lora_B.weight)
                 ) * self.scaling
-                if not torch.isfinite(lora_output).all():
-                    layer_id = id(self)
-                    if layer_id not in _lora_overflow_warned:
-                        _lora_overflow_warned.add(layer_id)
-                        logger.warning(
-                            f"[lora overflow] NaN/inf in lora_output | "
-                            f"x: {x.abs().max():.3e} dtype={x.dtype} | "
-                            f"lora_A max: {self.lora_A.weight.data.abs().max():.3e} | "
-                            f"lora_B max: {self.lora_B.weight.data.abs().max():.3e} | "
-                            f"scaling: {self.scaling:.4f}"
-                        )
                 result += lora_output.to(result.dtype)
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
