@@ -127,14 +127,10 @@ def train(
 
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        # load_in_8bit=load_in_8bit,
+        load_in_8bit=load_in_8bit,
         torch_dtype=torch.float16,
         device_map=device_map,
-        attn_implementation="eager",
     )
-    if getattr(model.config, "sliding_window", None) is not None:
-        logger.info(f"Disabling sliding_window attention (was {model.config.sliding_window}) for eager compatibility")
-        model.config.sliding_window = None
 
     # infer model type for tokenization and other stuff
     model_type = model.config.model_type
