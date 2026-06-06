@@ -87,9 +87,9 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
     else:
         raise NotImplementedError
     if hasattr(layer, 'state'):
-        weight = (layer.weight.data.float() * layer.state.SCB.reshape(-1, 1)) / 127
+        weight = (layer.weight.data * layer.state.SCB.reshape(-1, 1)) / 127
     else:
-        weight = layer.weight.data.float()  # fp16 weights can contain +inf (bf16→fp16 overflow)
+        weight = layer.weight.data
     s = (grad * (b @ a * layer.scaling + weight)).abs()
     if transpose:
         s = s.t()
