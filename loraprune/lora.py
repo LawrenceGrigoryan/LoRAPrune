@@ -248,8 +248,8 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_mask = nn.Parameter(torch.ones(out_features), requires_grad=False)
         # Actual trainable parameters
         if r > 0:
-            self.lora_A = nn.Linear(in_features, r, bias=False)
-            self.lora_B = nn.Linear(r, out_features, bias=False)
+            self.lora_A = nn.Linear(in_features, r, bias=False, dtype=torch.float16)
+            self.lora_B = nn.Linear(r, out_features, bias=False, dtype=torch.float16)
             self.scaling = self.lora_alpha / self.r
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
@@ -312,9 +312,9 @@ class Linear(nn.Linear, LoraLayer):
                 lora_output = (
                     F.linear(F.linear(lora_input, self.lora_A.weight), self.lora_B.weight)
                 ) * self.scaling
-                logger.debug(f"lora output dtype: {lora_input.dtype}")
+                logger.debug(f"lora output dtype: {lora_output.dtype}")
                 result += lora_output.to(result.dtype)
-                logger.debug(f"lora result dtype: {lora_input.dtype}")
+                logger.debug(f"lora result dtype: {result.dtype}")
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if hasattr(self, 'lora_mask'):
