@@ -132,6 +132,10 @@ def train(
         device_map=device_map,
         attn_implementation="eager",
     )
+    if getattr(model.config, "sliding_window", None) is not None:
+        logger.info(f"Disabling sliding_window attention (was {model.config.sliding_window}) for eager compatibility")
+        model.config.sliding_window = None
+
     # infer model type for tokenization and other stuff
     model_type = model.config.model_type
     if model_type not in SUPPORTED_MODELS:
