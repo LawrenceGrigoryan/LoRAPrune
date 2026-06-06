@@ -60,7 +60,7 @@ def main(
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         load_in_8bit=False,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,
         device_map=device,
     )
 
@@ -148,7 +148,7 @@ def main(
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
-    print("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    logger.info("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
 
     times = []
     eval_data = load_dataset('ptb_text_only', 'penn_treebank', split='validation', trust_remote_code=True)
@@ -156,7 +156,7 @@ def main(
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
-    print("PTB PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    logger.info("PTB PPL: {:.2f}  inference time: {:2f}".format(results, times))
 
     return
 
