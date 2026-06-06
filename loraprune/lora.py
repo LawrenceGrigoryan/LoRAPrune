@@ -315,5 +315,5 @@ class Linear(nn.Linear, LoraLayer):
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if hasattr(self, 'lora_mask'):
-            result = result * self.lora_mask.reshape(*([1] * (result.dim() - 1)), -1)
+            result = result * self.lora_mask.to(result.dtype).reshape(*([1] * (result.dim() - 1)), -1)
         return result
