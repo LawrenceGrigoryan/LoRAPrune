@@ -308,10 +308,13 @@ class Linear(nn.Linear, LoraLayer):
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 lora_input = self.lora_dropout(x)
+                logger.debug(f"lora input dtype: {lora_input.dtype}")
                 lora_output = (
                     F.linear(F.linear(lora_input, self.lora_A.weight), self.lora_B.weight)
                 ) * self.scaling
+                logger.debug(f"lora output dtype: {lora_input.dtype}")
                 result += lora_output.to(result.dtype)
+                logger.debug(f"lora result dtype: {lora_input.dtype}")
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if hasattr(self, 'lora_mask'):
