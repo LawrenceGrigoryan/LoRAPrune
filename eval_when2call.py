@@ -53,7 +53,7 @@ def main(base_model: str = "",
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         load_in_8bit=False,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,
         device_map=device,
     )
     tokenizer = AutoTokenizer.from_pretrained(base_model, legacy=False)

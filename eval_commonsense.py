@@ -52,7 +52,7 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
         model_id,
         load_in_8bit=False,
         device_map=device,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.float32,
     )
     tokenizer = AutoTokenizer.from_pretrained(adapter_id or model_id)
     
