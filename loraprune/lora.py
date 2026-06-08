@@ -29,8 +29,6 @@ from peft import LoraConfig
 
 from peft.utils import transpose
 
-_lora_overflow_warned = set()  # track which layers already warned to avoid log spam
-
 
 @dataclass
 class CustomLoraConfig(LoraConfig):
