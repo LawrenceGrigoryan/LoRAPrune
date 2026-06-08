@@ -310,7 +310,7 @@ class Linear(nn.Linear, LoraLayer):
             # Compute lora path in fp32: if upstream activations overflow fp16 (inf),
             # casting lora_B=0 to fp16 and doing F.linear(inf, 0) = NaN corrupts training.
             lora_output = F.linear(
-                F.linear(self.lora_dropout(x).float(), self.lora_A.weight),
+                F.linear(self.lora_dropout(x), self.lora_A.weight),
                 self.lora_B.weight
             ).to(x.dtype) * self.scaling
             result = result + lora_output
