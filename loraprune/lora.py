@@ -307,8 +307,6 @@ class Linear(nn.Linear, LoraLayer):
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-            # Compute lora path in fp32: if upstream activations overflow fp16 (inf),
-            # casting lora_B=0 to fp16 and doing F.linear(inf, 0) = NaN corrupts training.
             lora_output = F.linear(
                 F.linear(self.lora_dropout(x), self.lora_A.weight),
                 self.lora_B.weight
