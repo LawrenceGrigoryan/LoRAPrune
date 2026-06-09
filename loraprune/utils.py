@@ -80,8 +80,6 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
     if prune_metric == 'lora':
         grad_a = layer.lora_A.weight.grad
         grad_b = layer.lora_B.weight.grad
-        grad_a = torch.nan_to_num(grad_a, nan=0.0, posinf=0.0, neginf=0.0)
-        grad_b = torch.nan_to_num(grad_b, nan=0.0, posinf=0.0, neginf=0.0)
         grad = (grad_b @ a + b @ grad_a - grad_b @ grad_a)
     elif prune_metric == 'magnitude':
         grad = 1
@@ -107,6 +105,7 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
         s = s / (n + 1e-8)
     return s
 
+
 def prune_fp16_module(module, mask, transpose):
     mask = mask.bool()
     module.train()
@@ -125,6 +124,7 @@ def prune_fp16_module(module, mask, transpose):
         module.lora_A.in_features = int(mask.sum())
     module.merge_weights = True
     module.train(False)
+
 
 def prune_one_layer(layer):
     ## self_attn
