@@ -246,8 +246,8 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_mask = nn.Parameter(torch.ones(out_features), requires_grad=False)
         # Actual trainable parameters
         if r > 0:
-            self.lora_A = nn.Linear(in_features, r, bias=False, dtype=torch.float32)
-            self.lora_B = nn.Linear(r, out_features, bias=False, dtype=torch.float32)
+            self.lora_A = nn.Linear(in_features, r, bias=False)
+            self.lora_B = nn.Linear(r, out_features, bias=False)
             self.scaling = self.lora_alpha / self.r
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
@@ -271,20 +271,19 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_A.train(mode)
         self.lora_B.train(mode)
         if not mode and self.merge_weights and not self.merged:
+            # Merge the weights and mark it
             if self.r > 0:
                 self.weight.data += (
-                    transpose(self.lora_B.weight.to(self.weight.dtype) @ self.lora_A.weight.to(self.weight.dtype),
-                              self.fan_in_fan_out) * self.scaling
+                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
                 )
             self.merged = True
         elif self.merge_weights and self.merged:
+            # Make sure that the weights are not merged
             if self.r > 0:
                 self.weight.data -= (
-                    transpose(self.lora_B.weight.to(self.weight.dtype) @ self.lora_A.weight.to(self.weight.dtype),
-                              self.fan_in_fan_out) * self.scaling
+                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
                 )
             self.merged = False
-        return self
 
     def eval(self):
         """ 
@@ -298,20 +297,18 @@ class Linear(nn.Linear, LoraLayer):
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 self.weight.data -= (
-                    transpose(self.lora_B.weight.to(self.weight.dtype) @ self.lora_A.weight.to(self.weight.dtype),
-                              self.fan_in_fan_out) * self.scaling
+                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
                 )
                 self.merged = False
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-            lora_output = F.linear(
-                F.linear(self.lora_dropout(x).float(), self.lora_A.weight),
-                self.lora_B.weight
-            ).to(x.dtype) * self.scaling
-            result = result + lora_output
+            if self.r > 0:
+                # Ensure consistent data types
+                lora_output = self.lora_B(self.lora_A(self.lora_dropout(x).to(self.lora_A.weight.dtype))) * self.scaling
+                result += lora_output.to(result.dtype)
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if hasattr(self, 'lora_mask'):
-            result = result * self.lora_mask.to(result.dtype).reshape(*([1] * (result.dim() - 1)), -1)
+            result *= self.lora_mask.reshape(1, 1, -1)
         return result
