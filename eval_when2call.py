@@ -12,7 +12,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 
 from loraprune.peft_model import get_peft_model
-from loraprune.utils import freeze, prune_from_checkpoint
+from loraprune.utils import freeze, prune_from_checkpoint, get_attn_config
 from loraprune.lora import CustomLoraConfig
 from loraprune.data_utils import prepare_tokenizer
 from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
@@ -87,7 +87,7 @@ def main(base_model: str = "",
         model.to(device)
         
         freeze(model)
-        prune_from_checkpoint(model)
+        prune_from_checkpoint(model, get_attn_config(model))
         
         total_params_pruned = sum(p.numel() for p in model.parameters())
         logger.info(f"Total model parameters after pruning: {total_params_pruned}")

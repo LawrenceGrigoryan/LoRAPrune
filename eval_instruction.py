@@ -9,7 +9,7 @@ import lm_eval
 from lm_eval.models.huggingface import HFLM
 
 from loraprune.peft_model import get_peft_model
-from loraprune.utils import freeze, prune_from_checkpoint
+from loraprune.utils import freeze, prune_from_checkpoint, get_attn_config
 from loraprune.lora import CustomLoraConfig
 
 if torch.cuda.is_available():
@@ -76,7 +76,7 @@ def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8,
         model.to(device)
 
         freeze(model)
-        prune_from_checkpoint(model)
+        prune_from_checkpoint(model, get_attn_config(model))
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info(f"Total parameters after pruning: {total_params}")
