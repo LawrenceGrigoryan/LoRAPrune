@@ -73,11 +73,6 @@ def update_sensitivity_dict(model, s_dict, pruning_type):
 
     return s_dict
 
-def _bad(t, name):
-    if isinstance(t, torch.Tensor) and not torch.isfinite(t).all():
-        logger.warning(f"  compute_sensitivity: {name} has NaN/inf  max={t.float().abs().max():.3e}")
-        return True
-    return False
 
 def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, norm=True):
     a = layer.lora_A.weight.data
@@ -85,11 +80,9 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
     if prune_metric == 'lora':
         grad_a = layer.lora_A.weight.grad
         grad_b = layer.lora_B.weight.grad
-        _bad(grad_a, "raw grad_a"); _bad(grad_b, "raw grad_b")
         grad_a = torch.nan_to_num(grad_a, nan=0.0, posinf=0.0, neginf=0.0)
         grad_b = torch.nan_to_num(grad_b, nan=0.0, posinf=0.0, neginf=0.0)
         grad = (grad_b @ a + b @ grad_a - grad_b @ grad_a)
-        _bad(grad, "grad")
     elif prune_metric == 'magnitude':
         grad = 1
     elif prune_metric == 'grad':
@@ -100,9 +93,7 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
         weight = (layer.weight.data * layer.state.SCB.reshape(-1, 1)) / 127
     else:
         weight = layer.weight.data
-    _bad(weight, "weight")
     s = (grad * (b @ a * layer.scaling + weight)).abs()
-    _bad(s, "s_raw")
     if transpose:
         s = s.t()
 
@@ -111,12 +102,9 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
         s = s.reshape(s.shape[0] // HEAD_DIM, -1)
 
     s = s.sum(1)
-    _bad(s, "s_sum")
     if norm:
         n = torch.linalg.norm(s)
-        _bad(n, "norm")
         s = s / (n + 1e-8)
-        _bad(s, "s_normed")
     return s
 
 def prune_fp16_module(module, mask, transpose):
