@@ -9,7 +9,7 @@ import transformers
 from transformers import DataCollatorForSeq2Seq
 from datasets import load_dataset, load_from_disk
 from loraprune.trainer import LoRAPruneTrainer
-from loraprune.utils import freeze
+from loraprune.utils import freeze, get_attn_config
 from loraprune.lora import CustomLoraConfig
 from loraprune.peft_model import get_peft_model
 from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt
@@ -46,6 +46,7 @@ def train(
     cooldown_iters: float = 0.1,
     prune_freq: int = 10,
     prune_metric: str = 'lora',  # options: lora|grad|magnitude
+    gqa_prune_mode: str = 'coupled',  # options: coupled|fine_grained (only applies to GQA models)
     # lora hyperparams
     lora_r: int = 8,
     lora_alpha: int = 16,
@@ -135,6 +136,18 @@ def train(
     model_type = model.config.model_type
     if model_type not in SUPPORTED_MODELS:
         raise ValueError(f"`{model_type}` model type is not supported!")
+
+    attn_cfg = get_attn_config(model)
+    if attn_cfg.is_gqa:
+        logger.info(
+            f"GQA model detected: {attn_cfg.num_q_heads}Q / {attn_cfg.num_kv_heads}KV heads, "
+            f"head_dim={attn_cfg.head_dim}, q_heads_per_kv={attn_cfg.q_heads_per_kv}, "
+            f"prune_mode={gqa_prune_mode}"
+        )
+    else:
+        logger.info(
+            f"MHA model detected: {attn_cfg.num_q_heads} heads, head_dim={attn_cfg.head_dim}"
+        )
     
     if torch.cuda.is_available():
         device_id = torch.cuda.current_device()
@@ -252,7 +265,9 @@ def train(
         warmup_iters=warmup_iters,
         cooldown_iters=cooldown_iters,
         prune_freq=prune_freq,
-        prune_metric=prune_metric
+        prune_metric=prune_metric,
+        attn_cfg=attn_cfg,
+        gqa_prune_mode=gqa_prune_mode,
     )
 
     model.config.use_cache = False
