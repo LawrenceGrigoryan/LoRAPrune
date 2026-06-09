@@ -11,19 +11,19 @@ NUM_ATTENTION_HEADS = 16
 HEAD_DIM = 64
 NUM_KV_HEADS = 16
 
-def _is_target_larer(module):
+def _is_target_layer(module):
     return isinstance(module, Linear) and module.is_prune
 
 def unfreeze(model):
     for _, module in model.named_modules():
-        if _is_target_larer(module):
+        if _is_target_layer(module):
             module.weight.requires_grad = True
 
 def freeze(model):
     layers = len(model.model.model.layers)
     freeze_layer = int(layers * 0.1)
     for name, module in model.named_modules():
-        if _is_target_larer(module):
+        if _is_target_layer(module):
             layer = int(name.split('.')[4])
             if layer < freeze_layer or layer == layers-1:
                 module.is_prune = False
@@ -31,7 +31,7 @@ def freeze(model):
 def init_sensitivity_dict(model):
     sensitivity_record = {}
     for name, module in model.named_modules():
-        if _is_target_larer(module):
+        if _is_target_layer(module):
             weight_name = name.split('.')[-1]
             if weight_name in pruning_groups['self_attn']:
                 groups = module.out_features // HEAD_DIM
@@ -50,7 +50,7 @@ def init_sensitivity_dict(model):
 def update_sensitivity_dict(model, s_dict, pruning_type):
     s_all = init_sensitivity_dict(model)
     for name, module in model.named_modules():
-        if _is_target_larer(module):
+        if _is_target_layer(module):
             weight_name = name.split('.')[-1]
             is_attn = weight_name in pruning_groups['self_attn']
             fan_in = weight_name in pruning_groups['block']
@@ -166,7 +166,7 @@ def local_prune(model, s_dict, ratio, target_ratio):
     original_param_num = 0
     pruned_param_num = 0
     for name, module in model.named_modules():
-        if _is_target_larer(module):
+        if _is_target_layer(module):
             original_param_num += np.prod(module.weight.shape)
             pruned_param_num += np.prod(module.weight.shape) * ratio
             module_name = name.split('.')[-1]
