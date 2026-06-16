@@ -95,10 +95,8 @@ def init_sensitivity_dict(model):
             # prune whole kv-head for GQA architectures
             if is_gqa_model and (weight_name in pruning_groups['self_attn']):
                 n_groups = model.config.num_key_value_heads
-                logger.debug(f"GQA model with {n_groups} KV heads is detected.")
             elif weight_name in pruning_groups['self_attn']:
                 n_groups = model.config.num_attention_heads
-                logger.debug(f"MHA model with {n_groups} Attention heads is detected.")
             else:
                 n_groups = module.out_features
             
