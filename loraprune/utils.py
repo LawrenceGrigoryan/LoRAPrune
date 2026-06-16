@@ -20,6 +20,31 @@ def unfreeze(model):
             module.weight.requires_grad = True
 
 def freeze(model):
+    """
+    Exclude the bottom 10% of transformer layers and the final layer from pruning.
+
+    Sets ``module.is_prune = False`` on every LoRA-linear module that belongs to
+    a protected layer, making those modules invisible to all pruning routines
+    (``_is_target_layer`` returns ``False`` when ``is_prune`` is ``False``).
+
+    Early layers encode low-level token features that are hard to recover once
+    pruned; the last layer drives the vocabulary projection directly, so pruning
+    its heads collapses output quality disproportionately.
+
+    Parameters
+    ----------
+    model : transformers.PreTrainedModel
+        A PEFT-wrapped causal LM whose transformer blocks are accessible at
+        ``model.model.model.layers``. Each LoRA leaf is expected to be an
+        instance of ``loraprune.lora.Linear`` with an ``is_prune`` attribute.
+
+    Notes
+    -----
+    Mutates ``module.is_prune`` in-place; no return value.
+    ``unfreeze`` re-enables weight gradients but does **not** restore
+    ``is_prune``, so protected layers remain excluded from pruning for the
+    full training run.
+    """
     layers = len(model.model.model.layers)
     freeze_layer = int(layers * 0.1)
     for name, module in model.named_modules():
@@ -27,6 +52,7 @@ def freeze(model):
             layer = int(name.split('.')[4])
             if layer < freeze_layer or layer == layers-1:
                 module.is_prune = False
+
 
 def init_sensitivity_dict(model):
     sensitivity_record = {}
@@ -46,6 +72,7 @@ def init_sensitivity_dict(model):
             
             sensitivity_record[group_name] = module.lora_A.weight.data.new_zeros(groups)
     return sensitivity_record
+
 
 def update_sensitivity_dict(model, s_dict, pruning_type):
     s_all = init_sensitivity_dict(model)
@@ -71,6 +98,7 @@ def update_sensitivity_dict(model, s_dict, pruning_type):
         s_dict[group_name] = imp * 0.9 + s_all[group_name] * 0.1
 
     return s_dict
+
 
 def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, norm=True):
     a = layer.lora_A.weight.data
@@ -104,6 +132,7 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
         s = s / (torch.linalg.norm(s) + 1e-8)
     return s
 
+
 def prune_fp16_module(module, mask, transpose):
     mask = mask.bool()
     module.train()
@@ -122,6 +151,7 @@ def prune_fp16_module(module, mask, transpose):
         module.lora_A.in_features = int(mask.sum())
     module.merge_weights = True
     module.train(False)
+
 
 def prune_one_layer(layer):
     ## self_attn
@@ -154,10 +184,12 @@ def prune_one_layer(layer):
     del(layer.self_attn.o_proj.lora_mask)
     del(layer.mlp.down_proj.lora_mask)
 
+
 def prune(model):
     for layer_id, layer in enumerate(model.model.model.layers):
         logger.info("pruning layer {}".format(layer_id))
         prune_one_layer(layer)
+
 
 def local_prune(model, s_dict, ratio, target_ratio):
     original_param_num = 0
@@ -207,6 +239,7 @@ def local_prune(model, s_dict, ratio, target_ratio):
                                                                                original_param_num*1e-9,
                                                                                pruned_param_num/original_param_num))
 
+
 def schedule_sparsity_ratio(
     step,
     total_step,
@@ -226,8 +259,10 @@ def schedule_sparsity_ratio(
         sparsity = final_sparsity + (initial_sparsity - final_sparsity) * (mul_coeff ** 3)
     return sparsity
 
+
 def prune_from_checkpoint(model):
     prune(model)
+
 
 def print_trainable_parameters(model):
     total_params = 0
