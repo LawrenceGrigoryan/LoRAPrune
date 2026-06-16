@@ -119,18 +119,17 @@ def update_sensitivity_dict(model, s_dict, pruning_type):
             weight_name = name.split('.')[-1]
             is_attn = weight_name in pruning_groups['self_attn']
             fan_in = weight_name in pruning_groups['block']
+            
             s = compute_sensitivity(module, is_attn, pruning_type, fan_in)
             
-            # different num of heads in GQA => can't add up improtance for the whole block together
             group_name = ".".join(name.split('.')[:-1])
             
             s_all[group_name] += s
 
     for group_name, imp in s_all.items():
         if torch.isnan(imp.sum()) or torch.isinf(imp.sum()):
-            import warnings
-            warnings.warn(f"NaN/inf sensitivity detected for group '{group_name}', skipping sensitivity update for this step.")
-            return s_dict
+            logger.warning(f"NaN/inf sensitivity detected for group '{group_name}', skipping sensitivity update for this step.")
+            break
 
     for group_name, imp in s_dict.items():
         s_dict[group_name] = imp * 0.9 + s_all[group_name] * 0.1
