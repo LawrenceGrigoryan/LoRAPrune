@@ -23,6 +23,7 @@ dependencies = [
     "langdetect==1.0.9",
     "immutabledict==4.3.1",
     "matplotlib==3.10.9",
+    "loguru>=0.7.3",
 ]
 
 [tool.uv]
