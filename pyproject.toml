@@ -1,0 +1,42 @@
+[project]
+name = "loraprune"
+version = "0.1.0"
+description = "Structured Compression of Small LLMs via LoRA-Integrated Learnable Masks"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch==2.5.1; sys_platform == 'darwin'",
+    "torch==2.5.1+cu124; sys_platform == 'linux'",
+    "accelerate==1.1.1",
+    "appdirs==1.4.4",
+    "bitsandbytes==0.44.1; sys_platform == 'linux'",
+    "black==24.10.0",
+    "datasets==3.1.0",
+    "fire==0.7.0",
+    "peft==0.13.2",
+    "transformers==4.46.3",
+    "sentencepiece==0.2.0",
+    "gradio==5.8.0",
+    "lm-format-enforcer==0.10.9",
+    "protobuf==5.29.1",
+    "lm_eval==0.4.11",
+    "langdetect==1.0.9",
+    "immutabledict==4.3.1",
+    "matplotlib==3.10.9",
+]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" },
+]
