@@ -12,6 +12,11 @@ HEAD_DIM = 64
 NUM_KV_HEADS = 16
 
 
+def is_gqa_model(model) -> bool:
+    is_gqa_model = (model.config.num_attention_heads > model.config.num_key_value_heads)
+    return is_gqa_model
+
+
 def _is_target_layer(module):
     return isinstance(module, Linear) and module.is_prune
 
@@ -91,12 +96,11 @@ def init_sensitivity_dict(model):
         ``num_attention_heads`` and ``num_key_value_heads``.
     """
     sensitivity_record = {}
-    is_gqa_model = (model.config.num_attention_heads > model.config.num_key_value_heads)
     for name, module in model.named_modules():
         if _is_target_layer(module):
             weight_name = name.split('.')[-1]
             # prune whole kv-head for GQA architectures
-            if is_gqa_model and (weight_name in pruning_groups['self_attn']):
+            if is_gqa_model(model) and (weight_name in pruning_groups['self_attn']):
                 n_groups = model.config.num_key_value_heads
             elif weight_name in pruning_groups['self_attn']:
                 n_groups = model.config.num_attention_heads
@@ -157,10 +161,11 @@ def update_sensitivity_dict(
             is_attn = weight_name in pruning_groups['self_attn']
             fan_in = weight_name in pruning_groups['block']
             
-            s = compute_sensitivity(module, is_attn, pruning_type, fan_in)
+            s = compute_sensitivity(model, module, is_attn, pruning_type, fan_in)
             
             group_name = ".".join(name.split('.')[:-1])
             
+            # add up all lora importances for all projections of this layer
             s_all[group_name] += s
 
     for group_name, imp in s_all.items():
@@ -174,14 +179,67 @@ def update_sensitivity_dict(
     return s_dict
 
 
-def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, norm=True):
+def compute_sensitivity(model, layer, is_attn, prune_metric='lora', transpose=False, norm=True):
+    """
+    Compute a per-group importance score for a single LoRA-wrapped linear module.
+
+    The score combines the current weight magnitude with a gradient signal to
+    estimate how much each prunable group (head or neuron) contributes to the
+    loss.  Three metrics are supported:
+
+    ``'lora'``
+        First-order Taylor approximation of the weight change due to the LoRA
+        update.  The effective gradient of the full weight matrix ``W_eff = B@A``
+        is approximated as ``grad_B @ A + B @ grad_A - grad_B @ grad_A``, then
+        multiplied element-wise with the reconstructed effective weight
+        ``B @ A * scaling + W``.  Taking the absolute value gives a proxy for
+        the loss increase that would result from zeroing out each element.
+
+    ``'magnitude'``
+        Ignores gradients entirely; scores are the absolute values of the
+        effective weight ``B @ A * scaling + W``.
+
+    ``'grad'``
+        Uses the raw gradient of the base weight ``W`` directly.
+
+    For attention projections the score matrix is reshaped into groups before
+    summing.  In GQA models every group spans ``out_features // num_kv_heads``
+    rows (or columns after transpose), so that ``q_proj`` and ``o_proj`` scores
+    are aggregated to ``num_kv_heads`` values — matching the accumulator size
+    allocated by ``init_sensitivity_dict``.
+
+    Parameters
+    ----------
+    model : transformers.PreTrainedModel
+        The full model, used only to read ``config.num_attention_heads`` and
+        ``config.num_key_value_heads`` for head grouping.
+    layer : loraprune.lora.Linear
+        The LoRA-wrapped linear module to score.
+    is_attn : bool
+        Whether this projection belongs to the self-attention block.  Controls
+        whether the score is reshaped into per-head groups.
+    prune_metric : {'lora', 'magnitude', 'grad'}, optional
+        Sensitivity metric to use (default ``'lora'``).
+    transpose : bool, optional
+        Set to ``True`` for fan-in projections (``o_proj``, ``down_proj``) where
+        the pruned dimension is the input (columns of ``W``).  Transposes the
+        score matrix before grouping so rows always correspond to the pruned axis.
+    norm : bool, optional
+        If ``True`` (default), L2-normalise the final score vector so scores are
+        comparable across layers.
+
+    Returns
+    -------
+    torch.Tensor
+        1-D tensor of shape ``(num_groups,)`` where ``num_groups`` is
+        ``num_kv_heads`` for GQA attention, ``num_attention_heads`` for MHA
+        attention, or ``out_features`` for MLP projections.
+    """
     a = layer.lora_A.weight.data
     b = layer.lora_B.weight.data
     if prune_metric == 'lora':
         grad_a = layer.lora_A.weight.grad
         grad_b = layer.lora_B.weight.grad
-        grad_a = torch.nan_to_num(grad_a, nan=0.0, posinf=0.0, neginf=0.0)
-        grad_b = torch.nan_to_num(grad_b, nan=0.0, posinf=0.0, neginf=0.0)
         grad = (grad_b @ a + b @ grad_a - grad_b @ grad_a)
     elif prune_metric == 'magnitude':
         grad = 1
@@ -189,21 +247,28 @@ def compute_sensitivity(layer, is_attn, prune_metric='lora', transpose=False, no
         grad = layer.weight.grad
     else:
         raise NotImplementedError
+
     if hasattr(layer, 'state'):
         weight = (layer.weight.data * layer.state.SCB.reshape(-1, 1)) / 127
     else:
         weight = layer.weight.data
+
     s = (grad * (b @ a * layer.scaling + weight)).abs()
+    
     if transpose:
         s = s.t()
 
-    if is_attn:
-        # FIXME: all heads have the same head_dim, so hardcoding is fine for now
-        s = s.reshape(s.shape[0] // HEAD_DIM, -1)
+    if is_attn and is_gqa_model(model):
+        head_dim = layer.out_features // model.config.num_key_value_heads
+        s = s.reshape(s.shape[0] // head_dim, -1)
+    elif is_attn:
+        head_dim = layer.out_features // model.config.num_attention_heads
+        s = s.reshape(s.shape[0] // head_dim, -1)
 
     s = s.sum(1)
     if norm:
         s = s / (torch.linalg.norm(s) + 1e-8)
+
     return s
 
 
