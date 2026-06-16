@@ -6,9 +6,12 @@
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
 
-srun python ./evaluation/eval_perplexity.py \
-    --base_model "./models/meta-llama_Llama-3.2-1B" \
-    --lora_weights 'outputs_dir' \
+export HF_DATASETS_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_CACHE="./data/benchmarks/"
+
+srun python ./eval_perplexity.py \
+    --base_model "./models/Qwen_Qwen1.5-0.5B" \
     --cutoff_len 512 \
     --lora_r 8 \
     --lora_alpha 16 \

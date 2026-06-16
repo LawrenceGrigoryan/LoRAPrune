@@ -1,3 +1,4 @@
+import os
 import time
 from typing import List
 
@@ -56,6 +57,11 @@ def main(
         base_model
     ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
 
+    logger.info(
+        f"Parameters: base_model={base_model!r}, lora_r={lora_r}, lora_alpha={lora_alpha}, "
+        f"lora_dropout={lora_dropout}, lora_target_modules={lora_target_modules}, "
+        f"lora_weights={lora_weights!r}, cutoff_len={cutoff_len}"
+    )
     logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
@@ -67,6 +73,7 @@ def main(
     tokenizer = AutoTokenizer.from_pretrained(base_model, legacy=False)
     prepare_tokenizer(tokenizer, model.config.model_type)
 
+    logger.info(f"Model dtype: {model.dtype}")
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total model parameters: {total_params}")
     if lora_weights:
@@ -143,20 +150,20 @@ def main(
             return ppl.item()
 
     times = []
-    eval_data = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+    eval_data = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True)
     test_dataset = process_data(eval_data, tokenizer, cutoff_len, 'text')
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
-    print("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    logger.info("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
 
     times = []
-    eval_data = load_dataset('ptb_text_only', 'penn_treebank', split='validation', trust_remote_code=True)
+    eval_data = load_dataset('ptb_text_only', 'penn_treebank', split='validation', cache_dir=os.getenv("HF_BENCHMARKS_CACHE"), trust_remote_code=True)
     test_dataset = process_data(eval_data, tokenizer, cutoff_len, 'sentence')
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
-    print("PTB PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    logger.info("PTB PPL: {:.2f}  inference time: {:2f}".format(results, times))
 
     return
 

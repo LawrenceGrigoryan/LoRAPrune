@@ -7,9 +7,9 @@
 #SBATCH --gres=gpu:1
 
 srun python prune.py \
-    --base_model "./models/meta-llama_Llama-3.2-1B" \
-    --data_path './data/allenai_c4' \
-    --output_dir 'outputs_dir' \
+    --base_model "./models/Qwen_Qwen1.5-0.5B" \
+    --data_path './data/allenai___c4_120k' \
+    --output_dir 'outputs_dir/test' \
     --num_epochs 2 \
     --batch_size 128 \
     --micro_batch_size 1 \
@@ -26,3 +26,4 @@ srun python prune.py \
     --ratio 0.2 \
     --prune_metric 'lora' \
     --prune_freq 10 \
+    --fp16 false

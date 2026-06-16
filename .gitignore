@@ -4,6 +4,8 @@ models
 outputs_dir
 notebooks
 logs
+*.err
+*.log
 
 # Python bytecode
 __pycache__/
