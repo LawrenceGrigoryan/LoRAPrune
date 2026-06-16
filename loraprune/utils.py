@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from .lora import Linear
+from loraprune.lora import Linear
 from loguru import logger
 
 pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
