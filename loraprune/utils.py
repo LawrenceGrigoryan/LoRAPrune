@@ -11,13 +11,16 @@ NUM_ATTENTION_HEADS = 16
 HEAD_DIM = 64
 NUM_KV_HEADS = 16
 
+
 def _is_target_layer(module):
     return isinstance(module, Linear) and module.is_prune
+
 
 def unfreeze(model):
     for _, module in model.named_modules():
         if _is_target_layer(module):
             module.weight.requires_grad = True
+
 
 def freeze(model):
     """
@@ -110,7 +113,43 @@ def init_sensitivity_dict(model):
     return sensitivity_record
 
 
-def update_sensitivity_dict(model, s_dict, pruning_type):
+def update_sensitivity_dict(
+        model,
+        s_dict: dict[str, torch.Tensor],
+        pruning_type: str,
+    ) -> dict[str, torch.Tensor]:
+    """
+    Compute per-group sensitivity for the current step and fold it into the
+    running EMA stored in ``s_dict``.
+
+    For every prunable module, ``compute_sensitivity`` produces a score vector
+    whose length matches the group granularity defined by ``init_sensitivity_dict``
+    (KV heads for GQA attention, Q heads for MHA attention, neurons for MLP).
+    Scores for all projections that share a ``group_name`` key are summed into a
+    fresh accumulator ``s_all``, then blended into the historical estimate with an
+    exponential moving average::
+
+        s_dict[g] = 0.9 * s_dict[g] + 0.1 * s_all[g]
+
+    If any group produces a NaN or Inf score the entire step is skipped and
+    ``s_dict`` is returned unchanged.
+
+    Parameters
+    ----------
+    model : transformers.PreTrainedModel
+        PEFT-wrapped causal LM; same object passed to ``init_sensitivity_dict``.
+    s_dict : dict[str, torch.Tensor]
+        Running EMA sensitivity accumulator, initialised by
+        ``init_sensitivity_dict`` and mutated in-place.
+    pruning_type : str
+        Sensitivity metric forwarded to ``compute_sensitivity``
+        (``'lora'``, ``'magnitude'``, or ``'grad'``).
+
+    Returns
+    -------
+    dict[str, torch.Tensor]
+        The updated ``s_dict`` (same object, mutated in-place).
+    """
     s_all = init_sensitivity_dict(model)
     for name, module in model.named_modules():
         if _is_target_layer(module):
