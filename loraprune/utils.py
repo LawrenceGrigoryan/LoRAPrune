@@ -55,22 +55,60 @@ def freeze(model):
 
 
 def init_sensitivity_dict(model):
+    """
+    Allocate a zero-initialised sensitivity accumulator for every prunable group.
+
+    A "group" is the coarsest unit that can be removed atomically:
+
+    * **GQA attention block** (``num_attention_heads > num_key_value_heads``):
+      one slot per KV head.  Pruning KV head *i* removes the entire KV head from
+      ``k_proj`` / ``v_proj`` and the corresponding group of Q heads
+      (indices ``i*G … (i+1)*G-1``) from ``q_proj`` / ``o_proj``, where
+      ``G = num_attention_heads // num_key_value_heads``.  All four projections
+      (``q``, ``k``, ``v``, ``o``) therefore share a single accumulator of length
+      ``num_key_value_heads``.
+
+    * **MHA attention block** (``num_attention_heads == num_key_value_heads``):
+      one slot per attention head (length ``num_attention_heads``).
+
+    * **MLP block** (``up_proj``, ``gate_proj``): one slot per intermediate
+      neuron (length ``out_features``).
+
+    The dict is keyed by the *parent module path* (everything except the final
+    weight name), so all projections within one attention or MLP block map to the
+    same key.  Only the first projection encountered per block creates the entry;
+    subsequent projections hit the ``continue`` guard and are skipped.  This
+    relies on ``named_modules()`` returning ``q_proj`` before ``k/v/o_proj``,
+    which holds for standard HuggingFace LLaMA / Qwen implementations.
+
+    Parameters
+    ----------
+    model : transformers.PreTrainedModel
+        A PEFT-wrapped causal LM.  ``model.config`` must expose
+        ``num_attention_heads`` and ``num_key_value_heads``.
+    """
     sensitivity_record = {}
+    is_gqa_model = (model.config.num_attention_heads > model.config.num_key_value_heads)
     for name, module in model.named_modules():
         if _is_target_layer(module):
             weight_name = name.split('.')[-1]
-            if weight_name in pruning_groups['self_attn']:
-                groups = module.out_features // HEAD_DIM
+            # prune whole kv-head for GQA architectures
+            if is_gqa_model and (weight_name in pruning_groups['self_attn']):
+                n_groups = model.config.num_key_value_heads
+                logger.debug(f"GQA model with {n_groups} KV heads is detected.")
+            elif weight_name in pruning_groups['self_attn']:
+                n_groups = model.config.num_attention_heads
+                logger.debug(f"MHA model with {n_groups} Attention heads is detected.")
             else:
-                groups = module.out_features
-                
-            # different num of heads in GQA => can't add up improtance for the whole block together
+                n_groups = module.out_features
+            
+            # keep only the layer/group name without the specific weight name like `k_proj`
             group_name = ".".join(name.split('.')[:-1])
 
             if group_name in sensitivity_record:
                 continue
             
-            sensitivity_record[group_name] = module.lora_A.weight.data.new_zeros(groups)
+            sensitivity_record[group_name] = module.lora_A.weight.data.new_zeros(n_groups)
     return sensitivity_record
 
 
