@@ -1,3 +1,4 @@
+import json
 import os
 from typing import List
 from functools import partial
@@ -67,35 +68,13 @@ def train(
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     fp16: bool = True,  # whether to use mixed precision training
 ):
-    logger.info(
-        f"Pruning with params:\n"
-        f"base_model: {base_model}\n"
-        f"data_path: {data_path}\n"
-        f"output_dir: {output_dir}\n"
-        f"batch_size: {batch_size}\n"
-        f"micro_batch_size: {micro_batch_size}\n"
-        f"num_epochs: {num_epochs}\n"
-        f"learning_rate: {learning_rate}\n"
-        f"cutoff_len: {cutoff_len}\n"
-        f"train_set_size: {train_set_size}\n"
-        f"val_set_size: {val_set_size}\n"
-        f"lora_r: {lora_r}\n"
-        f"lora_alpha: {lora_alpha}\n"
-        f"lora_dropout: {lora_dropout}\n"
-        f"lora_target_modules: {lora_target_modules}\n"
-        f"train_on_inputs: {train_on_inputs}\n"
-        f"group_by_length: {group_by_length}\n"
-        f"load_in_8bit: {load_in_8bit}\n"
-        f"wandb_project: {wandb_project}\n"
-        f"wandb_run_name: {wandb_run_name}\n"
-        f"wandb_watch: {wandb_watch}\n"
-        f"wandb_log_model: {wandb_log_model}\n"
-        f"resume_from_checkpoint: {resume_from_checkpoint}\n"
-        f"prune_metric: {resume_from_checkpoint}\n"
-    )
-    assert (
-        base_model
-    ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
+    params = locals()
+    logger.info("Pruning with params:\n" + "\n".join(f"  {k}: {v}" for k, v in params.items()))
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, "train_params.json"), "w") as f:
+        json.dump(params, f, indent=2)
+
     gradient_accumulation_steps = batch_size // micro_batch_size
 
     device_map = "auto"
@@ -256,7 +235,6 @@ def train(
         for k, v in model.state_dict().items()
         if "lora_" in k
     }
-    os.makedirs(output_dir, exist_ok=True)
     safe_save_file(lora_state_dict, os.path.join(output_dir, ADAPTER_WEIGHTS_NAME))
     config.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
