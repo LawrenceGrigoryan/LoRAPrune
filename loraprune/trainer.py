@@ -18,7 +18,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, DistributedSampler, RandomSampler
 from transformers.trainer_pt_utils import IterableDatasetShard
-from transformers.utils import logging, is_torch_xla_available, is_apex_available
+from transformers.utils import is_torch_xla_available, is_apex_available
 from transformers.debug_utils import DebugOption, DebugUnderflowOverflow
 import os
 from packaging import version
@@ -53,7 +53,7 @@ def _diagnose_tensors(model, tag: str, step: int) -> None:
         logger.info(f"[{tag} step={step}] all weights and grads finite")
 
 is_torch_less_than_1_11 = parsed_torch_version_base < version.parse("1.11")
-logger = logging.get_logger(__name__)
+
 
 class LoRAPruneTrainer(Trainer):
     def __init__(self, model,
