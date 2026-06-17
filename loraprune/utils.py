@@ -7,10 +7,6 @@ pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
                   'mlp': ['up_proj', 'gate_proj'],
                   'block': ['o_proj', 'down_proj']}
 
-NUM_ATTENTION_HEADS = 16
-HEAD_DIM = 64
-NUM_KV_HEADS = 16
-
 
 def is_gqa_model(model) -> bool:
     is_gqa_model = (model.config.num_attention_heads > model.config.num_key_value_heads)
@@ -272,7 +268,7 @@ def compute_sensitivity(model, layer, is_attn, prune_metric='lora', transpose=Fa
     return s
 
 
-def prune_fp16_module(module, mask, transpose):
+def prune_fp16_module(model, module, mask, transpose):
     mask = mask.bool()
     module.train()
     if not transpose:
@@ -292,27 +288,46 @@ def prune_fp16_module(module, mask, transpose):
     module.train(False)
 
 
-def prune_one_layer(layer):
-    ## self_attn
-    prune_fp16_module(layer.self_attn.q_proj, layer.self_attn.q_proj.lora_mask, False)
-    prune_fp16_module(layer.self_attn.k_proj, layer.self_attn.k_proj.lora_mask, False)
-    prune_fp16_module(layer.self_attn.v_proj, layer.self_attn.v_proj.lora_mask, False)
+def prune_one_layer(model, layer):
+    is_gqa = is_gqa_model(model)
+    head_dim = model.config.hidden_size // model.config.num_attention_heads
+    
+    # self_attn
+    # torch stores weights in [out_features, in_features]
+    # => for GQA k_proj it will be [512, 2048] -> [num_kv_heads*head_dim, hidden_size]
+    # for GQA model, the mask must be expanded to remove all related Q-heads
+    # mask for k_proj removes head_dim consecutive rows -> removes 1 head
+    # mask for q_proj removes head_dim*num_q_per_kv consecutive rows -> removes all q heads for 1 kv head
+    if is_gqa:
+        num_q_per_kv = model.config.num_attention_heads // model.config.num_key_value_heads
+        # k_proj mask is the ground truth for which KV heads are pruned;
+        # derive q_proj mask from it so they stay in sync even if target_ratio
+        # caused local_prune to stop updating one projection early.
+        kv_mask = layer.self_attn.k_proj.lora_mask.reshape(-1, head_dim)[:, 0]
+        layer.self_attn.q_proj.lora_mask.data = kv_mask.repeat_interleave(num_q_per_kv * head_dim)
+        layer.self_attn.v_proj.lora_mask.data = layer.self_attn.k_proj.lora_mask.data.clone()
+
+
+    prune_fp16_module(model, layer.self_attn.q_proj, layer.self_attn.q_proj.lora_mask, False)
+    prune_fp16_module(model, layer.self_attn.k_proj, layer.self_attn.k_proj.lora_mask, False)
+    prune_fp16_module(model, layer.self_attn.v_proj, layer.self_attn.v_proj.lora_mask, False)
+    
     # q_proj out_features = o_proj in_features
     # after removing some heads o_proj rows must be removed accordingly
-    prune_fp16_module(layer.self_attn.o_proj, layer.self_attn.q_proj.lora_mask, True)
-    layer.self_attn.num_heads = int(layer.self_attn.q_proj.lora_mask.sum()) // HEAD_DIM
+    prune_fp16_module(model, layer.self_attn.o_proj, layer.self_attn.q_proj.lora_mask, True)
+    layer.self_attn.num_heads = int(layer.self_attn.q_proj.lora_mask.sum()) // head_dim
     layer.self_attn.hidden_size = int(layer.self_attn.q_proj.lora_mask.sum())
     # for GQA
     layer.self_attn.num_key_value_heads = (
-        layer.self_attn.k_proj.out_features // HEAD_DIM
+        layer.self_attn.k_proj.out_features // head_dim
     )
 
     ## mlp
-    prune_fp16_module(layer.mlp.gate_proj, layer.mlp.gate_proj.lora_mask, False)
-    prune_fp16_module(layer.mlp.up_proj, layer.mlp.up_proj.lora_mask, False)
+    prune_fp16_module(model, layer.mlp.gate_proj, layer.mlp.gate_proj.lora_mask, False)
+    prune_fp16_module(model, layer.mlp.up_proj, layer.mlp.up_proj.lora_mask, False)
     # gate/up outputs → down inputs
     # after removing 
-    prune_fp16_module(layer.mlp.down_proj, layer.mlp.gate_proj.lora_mask, True)
+    prune_fp16_module(model, layer.mlp.down_proj, layer.mlp.gate_proj.lora_mask, True)
 
     ## reset mask
     del(layer.self_attn.q_proj.lora_mask)
@@ -337,26 +352,28 @@ def local_prune(model, s_dict, ratio, target_ratio):
         if _is_target_layer(module):
             original_param_num += np.prod(module.weight.shape)
             pruned_param_num += np.prod(module.weight.shape) * ratio
-            module_name = name.split('.')[-1]
-            is_attn = module_name in pruning_groups['self_attn']
-            if module_name in pruning_groups['block']:
+            weight_name = name.split('.')[-1]
+            is_attn = weight_name in pruning_groups['self_attn']
+            if weight_name in pruning_groups['block']:
                 continue
             
             group_name = ".".join(name.split('.')[:-1])
 
             if not hasattr(module, 'lora_mask'):
                 continue
-            if (1-module.lora_mask.mean()).item() >= target_ratio:
+
+            if (1 - module.lora_mask.mean()).item() >= target_ratio:
                 continue
+
             total_num = module.lora_mask.numel()
             c_mask = module.lora_mask.data
             mask = torch.ones_like(c_mask)
 
-            # consider GQA
-            if module_name == "q_proj":
-                num_heads = NUM_ATTENTION_HEADS  # 32 for llama-3.2
-            elif module_name in ["k_proj", "v_proj"]:
-                num_heads = NUM_KV_HEADS  # 8 for llama-3.2
+            # consider MHA/GQA
+            if is_gqa_model(model) and weight_name in ["q_proj", "k_proj", "v_proj"]:
+                num_heads = model.config.num_key_value_heads
+            elif weight_name in ["q_proj", "k_proj", "v_proj"]:
+                num_heads = model.config.num_attention_heads
 
             # for attention - reshape the mask to be of size [n_heads, head_dim] to prune full heads
             if is_attn:
@@ -364,16 +381,19 @@ def local_prune(model, s_dict, ratio, target_ratio):
                 mask = mask.reshape(-1, head_dim)[:, 0]
                 c_mask = c_mask.reshape(-1, head_dim)[:, 0]
                 total_num /= head_dim  # convert into number of heads instead of neurons
+
             need_prune_num = int(total_num * ratio)
             importance = s_dict[group_name] * c_mask
             can_prune = torch.argsort(importance)[:need_prune_num]
             mask[can_prune] = 0
+
             if is_attn:
                 mask = (mask.new_ones(module.lora_mask.shape).reshape(-1, head_dim) * mask.unsqueeze(1)).reshape(-1)
             module.lora_mask.data = mask
         else:
             if hasattr(module, 'weight'):
                 original_param_num += np.prod(module.weight.shape)
+
     logger.info("pruned/original parameters number:{:3f}/{:3f}  ratio:{:3f}".format(pruned_param_num*1e-9,
                                                                                original_param_num*1e-9,
                                                                                pruned_param_num/original_param_num))
