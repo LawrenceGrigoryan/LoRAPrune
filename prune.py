@@ -9,7 +9,7 @@ import transformers
 from transformers import DataCollatorForSeq2Seq
 from datasets import load_dataset, load_from_disk
 from loraprune.trainer import LoRAPruneTrainer
-from loraprune.utils import freeze
+from loraprune.utils import freeze, is_gqa_model
 from loraprune.lora import LoraConfig
 from loraprune.peft_model import get_peft_model
 from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt
@@ -102,6 +102,10 @@ def train(
         torch_dtype=torch.float32,
         device_map=device_map,
     )
+
+    if is_gqa_model(model):
+        logger.debug(f"GQA model detected with:\nNUM_KV_HEADS={model.config.num_key_value_heads}\nNUM_ATTN_HEADS={model.config.num_attention_heads}")
+    
     # infer model type for tokenization and other stuff
     model_type = model.config.model_type
     if model_type not in SUPPORTED_MODELS:
