@@ -342,7 +342,7 @@ def prune_one_layer(model, layer):
 def prune(model):
     for layer_id, layer in enumerate(model.model.model.layers):
         logger.info("pruning layer {}".format(layer_id))
-        prune_one_layer(layer)
+        prune_one_layer(model, layer)
 
 
 def local_prune(model, s_dict, ratio, target_ratio):
