@@ -166,8 +166,7 @@ def update_sensitivity_dict(
 
     for group_name, imp in s_all.items():
         if torch.isnan(imp.sum()) or torch.isinf(imp.sum()):
-            logger.warning(f"NaN/inf sensitivity detected for group '{group_name}', skipping sensitivity update for this step.")
-            break
+            raise RuntimeError(f"NaN/inf sensitivity detected for group '{group_name}'")
 
     for group_name, imp in s_dict.items():
         s_dict[group_name] = imp * 0.9 + s_all[group_name] * 0.1
