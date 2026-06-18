@@ -360,15 +360,12 @@ class LoRAPruneTrainer(Trainer):
                         # deepspeed does its own clipping
 
                         if is_sagemaker_mp_enabled() and args.fp16:
-                            logger.info("Using smdistributed.modelparallelism.GradScaler for gradient clipping.")
                             grad_norm = self.optimizer.clip_master_grads(args.max_grad_norm)
                         elif self.use_apex:
-                            logger.info("Using Apex for gradient clipping.")
                             grad_norm = nn.utils.clip_grad_norm_(
                                 amp.master_params(self.optimizer), args.max_grad_norm
                             )
                         else:
-                            logger.info("Using accelerator.clip_grad_norm_ for gradient clipping.")
                             # accelerator.clip_grad_norm_ unscales AMP-scaled gradients before
                             # clipping, so the reported norm and the actual clip are both in
                             # true (unscaled) gradient space.  The old nn.utils.clip_grad_norm_
