@@ -358,7 +358,6 @@ class LoRAPruneTrainer(Trainer):
                     # Gradient clipping
                     if args.max_grad_norm is not None and args.max_grad_norm > 0 and not self.deepspeed:
                         # deepspeed does its own clipping
-
                         if is_sagemaker_mp_enabled() and args.fp16:
                             grad_norm = self.optimizer.clip_master_grads(args.max_grad_norm)
                         elif self.use_apex:
