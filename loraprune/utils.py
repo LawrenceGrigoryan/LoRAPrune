@@ -317,7 +317,6 @@ def prune_one_layer(model, layer):
     prune_fp16_module(model, layer.self_attn.o_proj, layer.self_attn.q_proj.lora_mask, True)
     layer.self_attn.num_heads = int(layer.self_attn.q_proj.lora_mask.sum()) // head_dim
     layer.self_attn.hidden_size = int(layer.self_attn.q_proj.lora_mask.sum())
-    # for GQA
     layer.self_attn.num_key_value_heads = (
         layer.self_attn.k_proj.out_features // head_dim
     )
