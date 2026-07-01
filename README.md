@@ -51,6 +51,12 @@ After pruning, you can evalute the pruning resutls on Wixitext2 and PTB datasets
 For non-commercial academic use, this project is licensed under [the 2-clause BSD License](https://opensource.org/license/bsd-2-clause). 
 For commercial use, please contact [Chunhua Shen](chhshen@gmail.com).
 
+## Run Tests
+
+```python
+python -m pytest .
+```
+
 
 
 
