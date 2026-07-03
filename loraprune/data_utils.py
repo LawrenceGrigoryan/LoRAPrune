@@ -50,16 +50,6 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_bos_tok
     return result
 
 
-def generate_sft_sample(data_point):
-    return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
-
-### Instruction:
-{data_point["instruction"]}
-
-### Response:
-{data_point["response"]}"""
-
-
 def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, model_type: str, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
         if model_type == "qwen2":
