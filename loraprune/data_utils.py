@@ -52,7 +52,7 @@ def tokenize(prompt: str, tokenizer: AutoTokenizer, cutoff_len: int, add_bos_tok
 
 def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, model_type: str, cutoff_len: int, train_on_inputs: bool):
     if not train_on_inputs:
-        if model_type == "qwen2":
+        if model_type in ["qwen2", "qwen3"]:
             prompt = data_point["instruction"]
             assistant_response = data_point["response"]
             messages = [
@@ -64,6 +64,7 @@ def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, mod
                 messages,
                 tokenize=False,
                 add_generation_prompt=False,
+                enable_thinking=False,
             )
             tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len-1, add_eos_token=False)
             assistant_bos = "<|im_start|>assistant\n"
