@@ -10,7 +10,7 @@ def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str) -> None:
     tokenizer.padding_side = "left"  # Allow batched inference
     if model_type == "llama":  # llama-3.2-1b
         tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
-    elif model_type == "qwen2":  # qwen-1.5-0.5b
+    elif model_type in ["qwen2", "qwen3"]:  # qwen-1.5-0.5b/qwen-3-0.6b
         # pad == eos, add a new one
         tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
         # qwen2 lacks bos token
@@ -81,11 +81,8 @@ def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, mod
         else:
             raise NotImplementedError(f"SFT Tokenization not implemented for model type: {model_type}")
     elif train_on_inputs:
-        # no bos token for qwen1.5/qwen2 base models 
-        if model_type == "qwen2":
-            full_prompt = data_point["text"]
-            tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_bos_token=False, add_eos_token=True)
-        else:
-            full_prompt = data_point["text"]
-            tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_bos_token=True, add_eos_token=True)
+        # no bos token for base models, simple next token prediction on any input
+        full_prompt = data_point["text"]
+        tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len, add_bos_token=False, add_eos_token=True)
+
     return tokenized_full_prompt

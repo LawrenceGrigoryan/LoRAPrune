@@ -23,7 +23,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 IGNORE_INDEX = -100
-SUPPORTED_MODELS = ["llama", "qwen2"]
+SUPPORTED_MODELS = ["llama", "qwen2", "qwen3"]
 
 
 def train(
