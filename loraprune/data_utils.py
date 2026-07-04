@@ -66,21 +66,42 @@ def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, mod
                 add_generation_prompt=False,
                 enable_thinking=False,
             )
+            full_prompt = full_prompt.replace("<think>\n\n</think>\n\n", "")
             tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len-1, add_eos_token=False)
             assistant_bos = "<|im_start|>assistant\n"
             user_prompt = full_prompt[:full_prompt.rfind(assistant_bos) + len(assistant_bos)]
             tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False)
             user_prompt_len = len(tokenized_user_prompt["input_ids"])
-
-            # could be sped up, probably
-            response_labels = tokenized_full_prompt["labels"][user_prompt_len:]
-            if len(response_labels) == 0:
-                logger.warning(f"No response tokens - omitting the sample, cutoff_len={cutoff_len}")
-                return {"input_ids": None, "attention_mask": None, "labels": None}
-            else:
-                tokenized_full_prompt["labels"] = [-100] * user_prompt_len + response_labels
+        elif model_type == "llama":
+            prompt = data_point["instruction"]
+            assistant_response = data_point["response"]
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": assistant_response}
+            ]
+            full_prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=False,
+                enable_thinking=False,
+            )
+            tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len-1, add_eos_token=False)
+            assistant_bos = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+            user_prompt = full_prompt[:full_prompt.rfind(assistant_bos) + len(assistant_bos)]
+            tokenized_user_prompt = tokenize(user_prompt, tokenizer, cutoff_len=cutoff_len, add_eos_token=False)
+            user_prompt_len = len(tokenized_user_prompt["input_ids"])
         else:
             raise NotImplementedError(f"SFT Tokenization not implemented for model type: {model_type}")
+    
+        # could be sped up, probably
+        response_labels = tokenized_full_prompt["labels"][user_prompt_len:]
+        if len(response_labels) == 0:
+            logger.warning(f"No response tokens - omitting the sample, cutoff_len={cutoff_len}")
+            return {"input_ids": None, "attention_mask": None, "labels": None}
+        else:
+            tokenized_full_prompt["labels"] = [-100] * user_prompt_len + response_labels
+            
     elif train_on_inputs:
         # no bos token for base models, simple next token prediction on any input
         full_prompt = data_point["text"]

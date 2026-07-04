@@ -14,7 +14,7 @@ dependencies = [
     "datasets==3.1.0",
     "fire==0.7.0",
     "peft==0.13.2",
-    "transformers==4.46.3",
+    "transformers==4.51.0",
     "sentencepiece==0.2.0",
     "gradio==5.8.0",
     "lm-format-enforcer==0.10.9",
