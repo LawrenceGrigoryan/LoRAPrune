@@ -165,7 +165,7 @@ def update_sensitivity_dict(
             try:
                 s_all[group_name] += s
             except:
-                logger.exception(f"Error for group name: {group_name}")
+                logger.exception(f"Error for group name: {group_name}, weight name: {weight_name}")
                 raise
             
     for group_name, imp in s_all.items():
