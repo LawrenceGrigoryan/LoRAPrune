@@ -162,8 +162,12 @@ def update_sensitivity_dict(
             group_name = ".".join(name.split('.')[:-1])
             
             # add up all lora importances for all projections of this layer
-            s_all[group_name] += s
-
+            try:
+                s_all[group_name] += s
+            except:
+                logger.exception(f"Error for group name: {group_name}")
+                raise
+            
     for group_name, imp in s_all.items():
         if torch.isnan(imp.sum()) or torch.isinf(imp.sum()):
             raise RuntimeError(f"NaN/inf sensitivity detected for group '{group_name}'")
