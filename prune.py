@@ -1,9 +1,11 @@
 import json
 import os
+import random
 from typing import List
 from functools import partial
 
 import fire
+import numpy as np
 import torch
 import transformers
 from transformers import DataCollatorForSeq2Seq
@@ -67,9 +69,15 @@ def train(
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     fp16: bool = True,  # whether to use mixed precision training
+    seed: int = 42,
 ):
     params = locals()
     logger.info("Pruning with params:\n" + "\n".join(f"  {k}: {v}" for k, v in params.items()))
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "train_params.json"), "w") as f:
