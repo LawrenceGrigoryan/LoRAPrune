@@ -258,11 +258,9 @@ def compute_sensitivity(model, layer, is_attn, prune_metric='lora', transpose=Fa
         s = s.t()
 
     if is_attn and is_gqa_model(model):
-        head_dim = layer.out_features // model.config.num_key_value_heads
-        s = s.reshape(s.shape[0] // head_dim, -1)
+        s = s.reshape(model.config.num_key_value_heads, -1)
     elif is_attn:
-        head_dim = layer.out_features // model.config.num_attention_heads
-        s = s.reshape(s.shape[0] // head_dim, -1)
+        s = s.reshape(model.config.num_attention_heads, -1)
 
     s = s.sum(1)
     if norm:
