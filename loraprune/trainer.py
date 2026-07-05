@@ -66,7 +66,8 @@ class LoRAPruneTrainer(Trainer):
                  warmup_iters,
                  cooldown_iters,
                  prune_freq,
-                 prune_metric
+                 prune_metric,
+                 adaptive_ema: bool = False,
                  ):
         super().__init__(model=model,
                          train_dataset=train_dataset,
@@ -80,6 +81,7 @@ class LoRAPruneTrainer(Trainer):
         self.cooldown_iters = cooldown_iters
         self.prune_freq = prune_freq
         self.prune_metric = prune_metric
+        self.adaptive_ema = adaptive_ema
 
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
@@ -262,6 +264,10 @@ class LoRAPruneTrainer(Trainer):
             utils.unfreeze(model)
 
         sensitivity_dict = utils.init_sensitivity_dict(model)
+        if self.adaptive_ema:
+            var_dict, alpha_dict, count_dict = utils.init_adaptive_ema_state(model)
+        else:
+            var_dict = alpha_dict = count_dict = None
         for epoch in range(epochs_trained, num_train_epochs):
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                 train_dataloader.sampler.set_epoch(epoch)
@@ -377,7 +383,13 @@ class LoRAPruneTrainer(Trainer):
 
                     # Optimizer step
                     if not self.deepspeed:
-                        sensitivity_dict = utils.update_sensitivity_dict(model, sensitivity_dict, self.prune_metric)
+                        sensitivity_dict = utils.update_sensitivity_dict(
+                            model, sensitivity_dict, self.prune_metric,
+                            adaptive_ema=self.adaptive_ema,
+                            var_dict=var_dict,
+                            alpha_dict=alpha_dict,
+                            count_dict=count_dict,
+                        )
                     ratio = utils.schedule_sparsity_ratio(self.state.global_step, self.state.max_steps,
                                                           self.warmup_iters,
                                                           self.cooldown_iters, self.init_ratio, self.ratio)

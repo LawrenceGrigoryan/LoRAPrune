@@ -3,6 +3,10 @@ import torch
 from loraprune.lora import Linear
 from loguru import logger
 
+_ADAPTIVE_VAR_BETA = 0.99   # smoothing for running variance tracker
+_ADAPTIVE_ALPHA_MIN = 0.70  # floor: most responsive to current step
+_ADAPTIVE_ALPHA_MAX = 0.95  # ceiling: most smoothing (stable groups)
+
 pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
                   'mlp': ['up_proj', 'gate_proj'],
                   'block': ['o_proj', 'down_proj']}
@@ -113,10 +117,50 @@ def init_sensitivity_dict(model):
     return sensitivity_record
 
 
+def init_adaptive_ema_state(model):
+    """
+    Allocate auxiliary state for adaptive per-group EMA (used when ``adaptive_ema=True``).
+
+    Returns three dicts keyed by the same group names as ``init_sensitivity_dict``:
+
+    * ``var_dict``   – zero-initialised running element-wise variance tensors (same
+                       shape and device as the corresponding ``s_dict`` entry).
+    * ``alpha_dict`` – float scalars per group, initialised to ``_ADAPTIVE_ALPHA_MAX``.
+    * ``count_dict`` – number of projections that feed into each group accumulator
+                       (4 for full attention blocks, 2 for MLP blocks).  Used to
+                       normalise the summed ``s_all`` values so that attention and MLP
+                       groups are on the same absolute scale before blending.
+    """
+    var_dict = {}
+    alpha_dict = {}
+    count_dict = {}
+    for name, module in model.named_modules():
+        if _is_target_layer(module):
+            weight_name = name.split('.')[-1]
+            if is_gqa_model(model) and (weight_name in pruning_groups['self_attn']):
+                n_groups = model.config.num_key_value_heads
+            elif weight_name in pruning_groups['self_attn']:
+                n_groups = model.config.num_attention_heads
+            else:
+                n_groups = module.out_features
+            group_name = ".".join(name.split('.')[:-1])
+            if group_name in var_dict:
+                count_dict[group_name] += 1
+                continue
+            var_dict[group_name] = module.lora_A.weight.data.new_zeros(n_groups)
+            alpha_dict[group_name] = _ADAPTIVE_ALPHA_MAX
+            count_dict[group_name] = 1
+    return var_dict, alpha_dict, count_dict
+
+
 def update_sensitivity_dict(
         model,
         s_dict: dict[str, torch.Tensor],
         pruning_type: str,
+        adaptive_ema: bool = False,
+        var_dict: dict | None = None,
+        alpha_dict: dict | None = None,
+        count_dict: dict | None = None,
     ) -> dict[str, torch.Tensor]:
     """
     Compute per-group sensitivity for the current step and fold it into the
@@ -126,13 +170,22 @@ def update_sensitivity_dict(
     whose length matches the group granularity defined by ``init_sensitivity_dict``
     (KV heads for GQA attention, Q heads for MHA attention, neurons for MLP).
     Scores for all projections that share a ``group_name`` key are summed into a
-    fresh accumulator ``s_all``, then blended into the historical estimate with an
-    exponential moving average::
+    fresh accumulator ``s_all``, then blended into the historical estimate.
+
+    When ``adaptive_ema=False`` (default), uses a fixed blend::
 
         s_dict[g] = 0.9 * s_dict[g] + 0.1 * s_all[g]
 
-    If any group produces a NaN or Inf score the entire step is skipped and
-    ``s_dict`` is returned unchanged.
+    When ``adaptive_ema=True``, the blend coefficient is adapted per group based
+    on how stable that group's importance signal has been.  Groups with low
+    variance get a high history weight (more smoothing); groups with high variance
+    get a lower history weight so recent gradient signals matter more.  A
+    cross-group normalization also divides each group's accumulated score by the
+    number of contributing projections (via ``count_dict``) before blending, so
+    attention blocks (4 projections) and MLP blocks (2 projections) are on the
+    same absolute scale.
+
+    If any group produces a NaN or Inf score a ``RuntimeError`` is raised.
 
     Parameters
     ----------
@@ -144,6 +197,16 @@ def update_sensitivity_dict(
     pruning_type : str
         Sensitivity metric forwarded to ``compute_sensitivity``
         (``'lora'``, ``'magnitude'``, or ``'grad'``).
+    adaptive_ema : bool, optional
+        When ``True``, use per-group adaptive EMA instead of fixed 0.9/0.1.
+        Requires ``var_dict``, ``alpha_dict``, and ``count_dict`` to be provided
+        (returned by ``init_adaptive_ema_state``).  Default ``False``.
+    var_dict : dict[str, torch.Tensor] | None
+        Running element-wise variance accumulators; mutated in-place.
+    alpha_dict : dict[str, float] | None
+        Current per-group EMA coefficient; mutated in-place for logging.
+    count_dict : dict[str, int] | None
+        Number of projections per group used for cross-group normalization.
 
     Returns
     -------
@@ -156,11 +219,11 @@ def update_sensitivity_dict(
             weight_name = name.split('.')[-1]
             is_attn = weight_name in pruning_groups['self_attn']
             fan_in = weight_name in pruning_groups['block']
-            
+
             s = compute_sensitivity(model, module, is_attn, pruning_type, fan_in)
-            
+
             group_name = ".".join(name.split('.')[:-1])
-            
+
             # add up all lora importances for all projections of this layer
             try:
                 s_all[group_name] += s
@@ -172,8 +235,30 @@ def update_sensitivity_dict(
         if torch.isnan(imp.sum()) or torch.isinf(imp.sum()):
             raise RuntimeError(f"NaN/inf sensitivity detected for group '{group_name}'")
 
+    if adaptive_ema and count_dict is not None:
+        # Normalize by projection count so attention (4) and MLP (2) groups
+        # contribute at the same per-projection scale before blending.
+        for group_name in s_all:
+            s_all[group_name] = s_all[group_name] / count_dict[group_name]
+
     for group_name, imp in s_dict.items():
-        s_dict[group_name] = imp * 0.9 + s_all[group_name] * 0.1
+        if adaptive_ema and var_dict is not None and alpha_dict is not None:
+            current = s_all[group_name]
+            # Update running element-wise variance of (current - EMA).
+            delta_sq = (current - imp) ** 2
+            var_dict[group_name] = (_ADAPTIVE_VAR_BETA * var_dict[group_name]
+                                    + (1.0 - _ADAPTIVE_VAR_BETA) * delta_sq)
+            # Derive per-group alpha: high variance → low alpha (track changes);
+            # low variance → high alpha (smooth aggressively).
+            # exp(-3 * sigma): sigma=0 → 1.0 (alpha=MAX); sigma≥0.5 → ≈0.22 (alpha→MIN).
+            sigma = var_dict[group_name].mean().sqrt()
+            alpha = (_ADAPTIVE_ALPHA_MIN
+                     + (_ADAPTIVE_ALPHA_MAX - _ADAPTIVE_ALPHA_MIN)
+                     * torch.exp(-3.0 * sigma)).clamp(_ADAPTIVE_ALPHA_MIN, _ADAPTIVE_ALPHA_MAX)
+            alpha_dict[group_name] = alpha.item()
+            s_dict[group_name] = alpha * imp + (1.0 - alpha) * current
+        else:
+            s_dict[group_name] = imp * 0.9 + s_all[group_name] * 0.1
 
     return s_dict
 

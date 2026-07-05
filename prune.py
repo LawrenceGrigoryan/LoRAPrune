@@ -48,6 +48,7 @@ def train(
     cooldown_iters: float = 0.1,
     prune_freq: int = 10,
     prune_metric: str = 'lora',  # options: lora|grad|magnitude
+    adaptive_ema: bool = False,  # use per-group variance-adaptive EMA instead of fixed 0.9/0.1
     # lora hyperparams
     lora_r: int = 8,
     lora_alpha: int = 16,
@@ -234,7 +235,8 @@ def train(
         warmup_iters=warmup_iters,
         cooldown_iters=cooldown_iters,
         prune_freq=prune_freq,
-        prune_metric=prune_metric
+        prune_metric=prune_metric,
+        adaptive_ema=adaptive_ema,
     )
 
     model.config.use_cache = False
