@@ -383,7 +383,9 @@ def local_prune(model, s_dict, ratio, target_ratio):
                 total_num /= head_dim  # convert into number of heads instead of neurons
 
             need_prune_num = int(total_num * ratio)
+            # set already pruned weights' importances to 0
             importance = s_dict[group_name] * c_mask
+            # the rest slots are new weights with lowest imporance to be pruned
             can_prune = torch.argsort(importance)[:need_prune_num]
             mask[can_prune] = 0
 
