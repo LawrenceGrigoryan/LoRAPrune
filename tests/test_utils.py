@@ -10,6 +10,7 @@ from loraprune.utils import (
     _is_target_layer,
     compute_sensitivity,
     freeze,
+    init_adaptive_ema_state,
     init_sensitivity_dict,
     is_gqa_model,
     local_prune,
@@ -737,3 +738,388 @@ class TestFreezeUnfreeze:
         for _, m in model.named_modules():
             if _is_target_layer(m):
                 assert m.weight.requires_grad is True
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — init_sensitivity_dict
+# ---------------------------------------------------------------------------
+
+class TestInitSensitivityDictGranularGQA:
+    """granular_gqa=True must track sensitivity at Q-head (not KV-head) granularity."""
+
+    def test_attn_shape_uses_q_heads(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        s = init_sensitivity_dict(model, granular_gqa=True)
+        attn_keys = [k for k in s if 'self_attn' in k]
+        assert len(attn_keys) == 1
+        assert s[attn_keys[0]].shape == (8,)  # per Q-head, NOT per KV-head
+
+    def test_mlp_shape_unchanged(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2, inter=64)
+        s = init_sensitivity_dict(model, granular_gqa=True)
+        mlp_keys = [k for k in s if 'mlp' in k]
+        assert s[mlp_keys[0]].shape == (64,)
+
+    def test_mha_unaffected_by_granular_flag(self):
+        model = _build_mha(num_layers=1, num_heads=4)
+        s_normal = init_sensitivity_dict(model, granular_gqa=False)
+        s_granular = init_sensitivity_dict(model, granular_gqa=True)
+        attn_key = next(k for k in s_normal if 'self_attn' in k)
+        assert s_normal[attn_key].shape == s_granular[attn_key].shape == (4,)
+
+    def test_default_false_gives_kv_head_shape(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        s = init_sensitivity_dict(model)  # granular_gqa defaults to False
+        attn_key = next(k for k in s if 'self_attn' in k)
+        assert s[attn_key].shape == (2,)  # KV-head granularity by default
+
+    def test_entries_initialised_to_zero(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        s = init_sensitivity_dict(model, granular_gqa=True)
+        for v in s.values():
+            assert v.sum().item() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — init_adaptive_ema_state
+# ---------------------------------------------------------------------------
+
+class TestInitAdaptiveEmaStateGranularGQA:
+    def test_var_dict_shape_matches_sensitivity_dict(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        s = init_sensitivity_dict(model, granular_gqa=True)
+        var_dict, alpha_dict, count_dict = init_adaptive_ema_state(model, granular_gqa=True)
+        for k in s:
+            assert var_dict[k].shape == s[k].shape
+
+    def test_var_shape_is_q_heads_not_kv_heads(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        var_dict, _, _ = init_adaptive_ema_state(model, granular_gqa=True)
+        attn_key = next(k for k in var_dict if 'self_attn' in k)
+        assert var_dict[attn_key].shape == (8,)
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — compute_sensitivity
+# ---------------------------------------------------------------------------
+
+class TestComputeSensitivityGranularGQA:
+    """All attention projections must return shape (num_q_heads,) in granular mode."""
+
+    def setup_method(self):
+        self.model = _build_gqa(num_layers=1, num_heads=8, num_kv=2, hidden=32)
+        self.layer0 = self.model.base_model.model.model.layers[0]
+        self.num_q = 8
+        self.num_kv = 2
+        self.num_q_per_kv = 4
+        self.head_dim = 4  # 32 / 8
+
+    def test_q_proj_returns_q_head_shape(self):
+        s = compute_sensitivity(self.model, self.layer0.self_attn.q_proj,
+                                is_attn=True, prune_metric='magnitude',
+                                granular_gqa=True)
+        assert s.shape == (self.num_q,)
+
+    def test_k_proj_not_called_in_granular_mode(self):
+        # update_sensitivity_dict skips k/v in granular GQA, so compute_sensitivity
+        # is never called for them.  Verify q_proj and o_proj still work correctly.
+        s_dict = init_sensitivity_dict(self.model, granular_gqa=True)
+        _set_lora_grads(self.model)
+        update_sensitivity_dict(self.model, s_dict, pruning_type='magnitude',
+                                granular_gqa=True)
+        # Sensitivity shape must be (num_q_heads,), accumulated from q_proj + o_proj only
+        attn_key = next(k for k in s_dict if 'self_attn' in k)
+        assert s_dict[attn_key].shape == (self.num_q,)
+        assert s_dict[attn_key].sum().item() > 0.0
+
+    def test_o_proj_transpose_returns_q_head_shape(self):
+        s = compute_sensitivity(self.model, self.layer0.self_attn.o_proj,
+                                is_attn=True, prune_metric='magnitude',
+                                transpose=True, granular_gqa=True)
+        assert s.shape == (self.num_q,)
+
+    def test_q_head_scores_differ_within_same_kv_group(self):
+        # With k/v excluded, per-Q-head scores come from q_proj alone and can
+        # differ within the same KV group — this is the whole point of granular mode.
+        w = self.layer0.self_attn.q_proj.weight.data
+        # Set each head's rows to a distinct value so scores differ within group 0
+        for h in range(self.num_q):
+            w[h * self.head_dim:(h + 1) * self.head_dim] = float(h + 1)
+        s = compute_sensitivity(self.model, self.layer0.self_attn.q_proj,
+                                is_attn=True, prune_metric='magnitude',
+                                norm=False, granular_gqa=True)
+        # Scores within KV group 0 (Q heads 0-3) must be distinguishable
+        assert not torch.allclose(s[0], s[1])
+
+    def test_non_attn_projection_unaffected(self):
+        s = compute_sensitivity(self.model, self.layer0.mlp.gate_proj,
+                                is_attn=False, prune_metric='magnitude',
+                                granular_gqa=True)
+        assert s.shape == (64,)  # MLP neurons, unchanged
+
+    def test_non_granular_k_proj_unchanged(self):
+        # Without granular_gqa, k_proj should still return KV-head shape
+        s = compute_sensitivity(self.model, self.layer0.self_attn.k_proj,
+                                is_attn=True, prune_metric='magnitude',
+                                granular_gqa=False)
+        assert s.shape == (self.num_kv,)
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — update_sensitivity_dict
+# ---------------------------------------------------------------------------
+
+class TestUpdateSensitivityDictGranularGQA:
+    def test_shape_preserved_as_q_heads(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        _set_lora_grads(model)
+        s_dict = init_sensitivity_dict(model, granular_gqa=True)
+        update_sensitivity_dict(model, s_dict, pruning_type='magnitude', granular_gqa=True)
+        attn_key = next(k for k in s_dict if 'self_attn' in k)
+        assert s_dict[attn_key].shape == (8,)
+
+    def test_ema_updates_from_zero(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        _set_lora_grads(model)
+        s_dict = init_sensitivity_dict(model, granular_gqa=True)
+        result = update_sensitivity_dict(model, s_dict, pruning_type='magnitude', granular_gqa=True)
+        attn_key = next(k for k in result if 'self_attn' in k)
+        assert result[attn_key].sum().item() > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — local_prune
+# ---------------------------------------------------------------------------
+
+class TestLocalPruneGranularGQA:
+    """
+    GQA: 8 Q-heads / 2 KV-heads, q_per_kv=4, hidden=32, head_dim=4.
+    KV group 0 ↔ Q heads 0-3; KV group 1 ↔ Q heads 4-7.
+    """
+
+    def setup_method(self):
+        self.hidden = 32
+        self.num_q = 8
+        self.num_kv = 2
+        self.head_dim = 4   # 32 / 8
+        self.num_q_per_kv = 4
+        self.inter = 64
+
+    def _build(self, num_layers=1):
+        return _build_gqa(num_layers=num_layers, hidden=self.hidden,
+                          num_heads=self.num_q, num_kv=self.num_kv, inter=self.inter)
+
+    def _s_dict(self, model, attn_scores):
+        """Build sensitivity dict with given per-Q-head scores for all attn groups."""
+        s = init_sensitivity_dict(model, granular_gqa=True)
+        for k in s:
+            if 'self_attn' in k:
+                s[k] = torch.tensor(attn_scores, dtype=torch.float)
+            else:
+                s[k].fill_(100.0)  # keep all MLP neurons
+        return s
+
+    def test_kv_head_pruned_when_all_q_heads_in_group_pruned(self):
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        # Q heads 0-3 (group 0) have low importance → all pruned at ratio=0.5
+        s_dict = self._s_dict(model, [1., 1., 1., 1., 100., 100., 100., 100.])
+        local_prune(model, s_dict, ratio=0.5, target_ratio=1.0, granular_gqa=True)
+        # KV head 0 must be masked out
+        k_mask = layer.self_attn.k_proj.lora_mask
+        assert k_mask[:self.head_dim].sum().item() == 0.0, "KV head 0 should be pruned"
+        assert k_mask[self.head_dim:].sum().item() == self.head_dim, "KV head 1 should survive"
+
+    def test_kv_head_kept_when_some_q_heads_in_group_survive(self):
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        # Q heads 0,1 pruned (low importance), but Q heads 2,3 survive → KV head 0 must stay
+        s_dict = self._s_dict(model, [1., 1., 100., 100., 100., 100., 100., 100.])
+        local_prune(model, s_dict, ratio=0.25, target_ratio=1.0, granular_gqa=True)
+        k_mask = layer.self_attn.k_proj.lora_mask
+        # KV head 0 still alive because Q heads 2,3 survive
+        assert k_mask[:self.head_dim].sum().item() == self.head_dim, \
+            "KV head 0 should be kept (Q heads 2,3 are alive in its group)"
+
+    def test_q_heads_pruned_independently_within_same_kv_group(self):
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        # Q heads 0,1 (in group 0) pruned; Q heads 2,3 (also group 0) kept
+        s_dict = self._s_dict(model, [1., 1., 100., 100., 100., 100., 100., 100.])
+        local_prune(model, s_dict, ratio=0.25, target_ratio=1.0, granular_gqa=True)
+        q_mask = layer.self_attn.q_proj.lora_mask
+        # Q heads 0,1 → indices 0-7 should be 0
+        assert q_mask[:2 * self.head_dim].sum().item() == 0.0
+        # Q heads 2,3 → indices 8-15 should be 1
+        assert q_mask[2 * self.head_dim:4 * self.head_dim].sum().item() == 2 * self.head_dim
+
+    def test_v_proj_mask_matches_k_proj_mask(self):
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        s_dict = self._s_dict(model, [1., 1., 1., 1., 100., 100., 100., 100.])
+        local_prune(model, s_dict, ratio=0.5, target_ratio=1.0, granular_gqa=True)
+        k_mask = layer.self_attn.k_proj.lora_mask
+        v_mask = layer.self_attn.v_proj.lora_mask
+        assert torch.equal(k_mask, v_mask), "v_proj mask must mirror k_proj mask"
+
+    def test_k_proj_not_independently_pruned(self):
+        # k_proj sparsity should be determined by q_proj, not by its own importance score.
+        # If both KV groups have high sensitivity, k_proj should remain fully alive
+        # even if ratio would nominally prune some of it.
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        # All Q heads have equal (non-zero) importance; ratio=0.5 prunes half the Q heads
+        # but we keep the other half → BOTH KV heads must stay alive (each group retains 2 Q heads)
+        s_dict = self._s_dict(model, [1., 1., 100., 100., 1., 1., 100., 100.])
+        local_prune(model, s_dict, ratio=0.5, target_ratio=1.0, granular_gqa=True)
+        k_mask = layer.self_attn.k_proj.lora_mask
+        # Both KV groups still have at least 2 alive Q heads → k_proj fully alive
+        assert k_mask.sum().item() == k_mask.numel(), "Both KV heads must stay alive"
+
+    def test_both_kv_groups_pruned_when_all_q_heads_pruned(self):
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        # All Q heads have equal (low) importance — all pruned at ratio=1.0
+        s_dict = self._s_dict(model, [1., 1., 1., 1., 1., 1., 1., 1.])
+        local_prune(model, s_dict, ratio=1.0, target_ratio=1.0, granular_gqa=True)
+        k_mask = layer.self_attn.k_proj.lora_mask
+        assert k_mask.sum().item() == 0.0, "All KV heads should be pruned when all Q heads are gone"
+
+    def test_mlp_masks_unaffected_by_granular_flag(self):
+        model = self._build()
+        layer = model.base_model.model.model.layers[0]
+        s_dict = init_sensitivity_dict(model, granular_gqa=True)
+        for k in s_dict:
+            if 'mlp' in k:
+                # First 32 neurons high importance, last 32 low
+                s_dict[k] = torch.cat([torch.ones(32) * 100, torch.ones(32) * 1.0])
+            else:
+                s_dict[k].fill_(100.0)
+        local_prune(model, s_dict, ratio=0.5, target_ratio=1.0, granular_gqa=True)
+        gate_mask = layer.mlp.gate_proj.lora_mask
+        assert gate_mask[:32].sum().item() == 32.0
+        assert gate_mask[32:].sum().item() == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — prune_one_layer
+# ---------------------------------------------------------------------------
+
+class TestPruneOneLayerGranularGQA:
+    """
+    GQA: 8 Q-heads / 2 KV-heads, hidden=32, head_dim=4, q_per_kv=4.
+    KV group 0 ↔ Q heads 0-3; KV group 1 ↔ Q heads 4-7.
+    q_proj ground truth; k/v_proj derived.
+    """
+
+    def setup_method(self):
+        self.hidden = 32
+        self.num_q = 8
+        self.num_kv = 2
+        self.head_dim = 4
+        self.num_q_per_kv = 4
+        self.inter = 64
+        self.model = _build_gqa(num_layers=1, hidden=self.hidden,
+                                num_heads=self.num_q, num_kv=self.num_kv,
+                                inter=self.inter)
+        self.layer = self.model.base_model.model.model.layers[0]
+
+    def _set_masks(self, keep_q_head_indices):
+        """Set q_proj mask keeping the specified Q-head indices; o_proj matches."""
+        q_out = self.num_q * self.head_dim
+        q_mask = torch.zeros(q_out)
+        for h in keep_q_head_indices:
+            q_mask[h * self.head_dim:(h + 1) * self.head_dim] = 1.0
+        self.layer.self_attn.q_proj.lora_mask.data = q_mask.clone()
+        self.layer.self_attn.o_proj.lora_mask.data = q_mask.clone()
+        # k/v masks initialised to all-ones; prune_one_layer must overwrite them
+        kv_out = self.num_kv * self.head_dim
+        self.layer.self_attn.k_proj.lora_mask.data = torch.ones(kv_out)
+        self.layer.self_attn.v_proj.lora_mask.data = torch.ones(kv_out)
+        # MLP: keep everything
+        for proj in (self.layer.mlp.gate_proj, self.layer.mlp.up_proj,
+                     self.layer.mlp.down_proj):
+            proj.lora_mask.data = torch.ones(self.inter)
+
+    def test_entire_group_pruned_removes_kv_head(self):
+        # Prune all of group 0 (Q heads 0-3); keep group 1 (Q heads 4-7)
+        self._set_masks(keep_q_head_indices=[4, 5, 6, 7])
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        # 4 Q heads kept → 4 * head_dim = 16 rows in q_proj
+        assert self.layer.self_attn.q_proj.weight.shape == (16, self.hidden)
+        # Group 0 pruned → KV head 0 removed; 1 KV head left → head_dim = 4 rows
+        assert self.layer.self_attn.k_proj.weight.shape == (4, self.hidden)
+        assert self.layer.self_attn.v_proj.weight.shape == (4, self.hidden)
+        # o_proj columns = q_proj rows
+        assert self.layer.self_attn.o_proj.weight.shape == (self.hidden, 16)
+
+    def test_num_heads_and_kv_heads_updated(self):
+        self._set_masks(keep_q_head_indices=[4, 5, 6, 7])
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        assert self.layer.self_attn.num_heads == 4
+        assert self.layer.self_attn.num_key_value_heads == 1
+
+    def test_partial_group_keeps_kv_head(self):
+        # Prune Q heads 0,1 only (partial group 0); Q heads 2,3 survive → KV head 0 stays
+        self._set_masks(keep_q_head_indices=[2, 3, 4, 5, 6, 7])
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        # 6 Q heads kept → 6 * head_dim = 24 rows
+        assert self.layer.self_attn.q_proj.weight.shape == (24, self.hidden)
+        # Both KV heads kept (group 0 has Q heads 2,3; group 1 has Q heads 4-7)
+        assert self.layer.self_attn.k_proj.weight.shape == (8, self.hidden)
+        assert self.layer.self_attn.num_key_value_heads == 2
+
+    def test_q_proj_mask_overrides_stale_kv_masks(self):
+        # k_proj/v_proj masks are initialised to all-ones in _set_masks;
+        # prune_one_layer must replace them from the q_proj mask.
+        self._set_masks(keep_q_head_indices=[4, 5, 6, 7])
+        # Deliberately set k_proj mask to wrong value before calling prune
+        self.layer.self_attn.k_proj.lora_mask.data = torch.ones(self.num_kv * self.head_dim)
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        # k_proj must have only 1 KV head (not 2), showing the stale mask was overwritten
+        assert self.layer.self_attn.k_proj.weight.shape == (self.head_dim, self.hidden)
+
+    def test_no_pruning_preserves_shapes(self):
+        # All Q heads kept → both KV heads kept → no change
+        self._set_masks(keep_q_head_indices=list(range(self.num_q)))
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        assert self.layer.self_attn.q_proj.weight.shape == (self.num_q * self.head_dim, self.hidden)
+        assert self.layer.self_attn.k_proj.weight.shape == (self.num_kv * self.head_dim, self.hidden)
+        assert self.layer.self_attn.num_heads == self.num_q
+        assert self.layer.self_attn.num_key_value_heads == self.num_kv
+
+    def test_lora_masks_removed_after_prune(self):
+        self._set_masks(keep_q_head_indices=[4, 5, 6, 7])
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        for proj in (self.layer.self_attn.q_proj, self.layer.self_attn.k_proj,
+                     self.layer.self_attn.v_proj, self.layer.self_attn.o_proj,
+                     self.layer.mlp.gate_proj, self.layer.mlp.up_proj,
+                     self.layer.mlp.down_proj):
+            assert not hasattr(proj, 'lora_mask')
+
+    def test_v_proj_derived_from_q_mask_not_k_mask(self):
+        # k_proj and v_proj must be derived independently from q; both should
+        # end up with the same shape derived from the q_proj mask.
+        self._set_masks(keep_q_head_indices=[4, 5, 6, 7])
+        prune_one_layer(self.model, self.layer, granular_gqa=True)
+        assert self.layer.self_attn.v_proj.weight.shape == \
+               self.layer.self_attn.k_proj.weight.shape
+
+    def test_non_granular_mode_unchanged(self):
+        # With granular_gqa=False the original GQA path must still work:
+        # k_proj mask is ground truth; q_proj derived from it.
+        kv_out = self.num_kv * self.head_dim
+        k_mask = torch.zeros(kv_out)
+        k_mask[:self.head_dim] = 1.0  # only KV head 0
+        self.layer.self_attn.k_proj.lora_mask.data = k_mask.clone()
+        self.layer.self_attn.v_proj.lora_mask.data = k_mask.clone()
+        q_out = self.num_q * self.head_dim
+        self.layer.self_attn.q_proj.lora_mask.data = torch.ones(q_out)
+        self.layer.self_attn.o_proj.lora_mask.data = torch.ones(q_out)
+        for proj in (self.layer.mlp.gate_proj, self.layer.mlp.up_proj,
+                     self.layer.mlp.down_proj):
+            proj.lora_mask.data = torch.ones(self.inter)
+        prune_one_layer(self.model, self.layer, granular_gqa=False)
+        # 1 KV head × 4 Q-per-KV = 4 Q heads → 16 rows
+        assert self.layer.self_attn.q_proj.weight.shape == (16, self.hidden)
+        assert self.layer.self_attn.k_proj.weight.shape == (self.head_dim, self.hidden)

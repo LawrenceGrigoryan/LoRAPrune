@@ -62,7 +62,7 @@ def freeze(model):
                 module.is_prune = False
 
 
-def init_sensitivity_dict(model):
+def init_sensitivity_dict(model, granular_gqa=False):
     """
     Allocate a zero-initialised sensitivity accumulator for every prunable group.
 
@@ -75,6 +75,10 @@ def init_sensitivity_dict(model):
       ``G = num_attention_heads // num_key_value_heads``.  All four projections
       (``q``, ``k``, ``v``, ``o``) therefore share a single accumulator of length
       ``num_key_value_heads``.
+
+      When ``granular_gqa=True``, the accumulator has length
+      ``num_attention_heads`` instead — one slot per Q head — so that each Q
+      head can be scored and pruned independently before its KV head is removed.
 
     * **MHA attention block** (``num_attention_heads == num_key_value_heads``):
       one slot per attention head (length ``num_attention_heads``).
@@ -94,30 +98,35 @@ def init_sensitivity_dict(model):
     model : transformers.PreTrainedModel
         A PEFT-wrapped causal LM.  ``model.config`` must expose
         ``num_attention_heads`` and ``num_key_value_heads``.
+    granular_gqa : bool, optional
+        When ``True`` and the model is GQA, track sensitivity at Q-head
+        granularity (``num_attention_heads``) rather than KV-head granularity.
     """
     sensitivity_record = {}
     for name, module in model.named_modules():
         if _is_target_layer(module):
             weight_name = name.split('.')[-1]
-            # prune whole kv-head for GQA architectures
             if is_gqa_model(model) and (weight_name in pruning_groups['self_attn']):
-                n_groups = model.config.num_key_value_heads
+                if granular_gqa:
+                    n_groups = model.config.num_attention_heads
+                else:
+                    n_groups = model.config.num_key_value_heads
             elif weight_name in pruning_groups['self_attn']:
                 n_groups = model.config.num_attention_heads
             else:
                 n_groups = module.out_features
-            
+
             # keep only the layer/group name without the specific weight name like `k_proj`
             group_name = ".".join(name.split('.')[:-1])
 
             if group_name in sensitivity_record:
                 continue
-            
+
             sensitivity_record[group_name] = module.lora_A.weight.data.new_zeros(n_groups)
     return sensitivity_record
 
 
-def init_adaptive_ema_state(model):
+def init_adaptive_ema_state(model, granular_gqa=False):
     """
     Allocate auxiliary state for adaptive per-group EMA (used when ``adaptive_ema=True``).
 
@@ -130,6 +139,12 @@ def init_adaptive_ema_state(model):
                        (4 for full attention blocks, 2 for MLP blocks).  Used to
                        normalise the summed ``s_all`` values so that attention and MLP
                        groups are on the same absolute scale before blending.
+
+    Parameters
+    ----------
+    granular_gqa : bool, optional
+        Must match the value passed to ``init_sensitivity_dict`` so that tensor
+        shapes are consistent.
     """
     var_dict = {}
     alpha_dict = {}
@@ -138,12 +153,18 @@ def init_adaptive_ema_state(model):
         if _is_target_layer(module):
             weight_name = name.split('.')[-1]
             if is_gqa_model(model) and (weight_name in pruning_groups['self_attn']):
-                n_groups = model.config.num_key_value_heads
+                if granular_gqa:
+                    n_groups = model.config.num_attention_heads
+                else:
+                    n_groups = model.config.num_key_value_heads
             elif weight_name in pruning_groups['self_attn']:
                 n_groups = model.config.num_attention_heads
             else:
                 n_groups = module.out_features
             group_name = ".".join(name.split('.')[:-1])
+            # k/v don't contribute to sensitivity in granular GQA — exclude from count
+            if granular_gqa and is_gqa_model(model) and weight_name in ["k_proj", "v_proj"]:
+                continue
             if group_name in var_dict:
                 count_dict[group_name] += 1
                 continue
@@ -161,6 +182,7 @@ def update_sensitivity_dict(
         var_dict: dict | None = None,
         alpha_dict: dict | None = None,
         count_dict: dict | None = None,
+        granular_gqa: bool = False,
     ) -> dict[str, torch.Tensor]:
     """
     Compute per-group sensitivity for the current step and fold it into the
@@ -213,14 +235,19 @@ def update_sensitivity_dict(
     dict[str, torch.Tensor]
         The updated ``s_dict`` (same object, mutated in-place).
     """
-    s_all = init_sensitivity_dict(model)
+    s_all = init_sensitivity_dict(model, granular_gqa=granular_gqa)
     for name, module in model.named_modules():
         if _is_target_layer(module):
             weight_name = name.split('.')[-1]
             is_attn = weight_name in pruning_groups['self_attn']
             fan_in = weight_name in pruning_groups['block']
 
-            s = compute_sensitivity(model, module, is_attn, pruning_type, fan_in)
+            # In granular GQA mode, k/v scores are identical within a KV group and
+            # don't help discriminate between Q heads — only q_proj and o_proj score.
+            if granular_gqa and is_gqa_model(model) and weight_name in ["k_proj", "v_proj"]:
+                continue
+
+            s = compute_sensitivity(model, module, is_attn, pruning_type, fan_in, granular_gqa=granular_gqa)
 
             group_name = ".".join(name.split('.')[:-1])
 
@@ -263,7 +290,7 @@ def update_sensitivity_dict(
     return s_dict
 
 
-def compute_sensitivity(model, layer, is_attn, prune_metric='lora', transpose=False, norm=True):
+def compute_sensitivity(model, layer, is_attn, prune_metric='lora', transpose=False, norm=True, granular_gqa=False):
     """
     Compute a per-group importance score for a single LoRA-wrapped linear module.
 
@@ -342,12 +369,14 @@ def compute_sensitivity(model, layer, is_attn, prune_metric='lora', transpose=Fa
     if transpose:
         s = s.t()
 
-    if is_attn and is_gqa_model(model):
+    # Only q_proj and o_proj contribute in granular mode — k/v projections are
+    # skipped by update_sensitivity_dict so this branch is only reached for q/o.
+    if is_attn and is_gqa_model(model) and not granular_gqa:
         s = s.reshape(model.config.num_key_value_heads, -1)
     elif is_attn:
         s = s.reshape(model.config.num_attention_heads, -1)
 
-    s = s.sum(1)
+    s = s.sum(1)  # collapse (num_heads, head_dim * in_features) -> (num_heads,)
     if norm:
         s = s / (torch.linalg.norm(s) + 1e-8)
 
@@ -374,17 +403,25 @@ def prune_fp16_module(model, module, mask, transpose):
     module.train(False)
 
 
-def prune_one_layer(model, layer):
+def prune_one_layer(model, layer, granular_gqa=False):
     is_gqa = is_gqa_model(model)
     head_dim = model.config.hidden_size // model.config.num_attention_heads
-    
+
     # self_attn
     # torch stores weights in [out_features, in_features]
     # => for GQA k_proj it will be [512, 2048] -> [num_kv_heads*head_dim, hidden_size]
     # for GQA model, the mask must be expanded to remove all related Q-heads
     # mask for k_proj removes head_dim consecutive rows -> removes 1 head
     # mask for q_proj removes head_dim*num_q_per_kv consecutive rows -> removes all q heads for 1 kv head
-    if is_gqa:
+    if is_gqa and granular_gqa:
+        num_q_per_kv = model.config.num_attention_heads // model.config.num_key_value_heads
+        # q_proj mask is ground truth (Q-head granularity set by local_prune);
+        # derive KV mask: KV head i is kept iff any Q head in its group is kept.
+        q_mask = layer.self_attn.q_proj.lora_mask.reshape(-1, head_dim)[:, 0]    # (num_q_heads,)
+        kv_mask = q_mask.reshape(-1, num_q_per_kv).any(dim=1).float()           # (num_kv_heads, num_q_per_kv) → any → (num_kv_heads,)
+        layer.self_attn.k_proj.lora_mask.data = kv_mask.repeat_interleave(head_dim)  # e.g. kv_mask=[0.,1.] → [0,0,0,0, 1,1,1,1]  shape (num_kv_heads*head_dim,)
+        layer.self_attn.v_proj.lora_mask.data = kv_mask.repeat_interleave(head_dim)
+    elif is_gqa:
         num_q_per_kv = model.config.num_attention_heads // model.config.num_key_value_heads
         # k_proj mask is the ground truth for which KV heads are pruned;
         # derive q_proj mask from it so they stay in sync even if target_ratio
@@ -424,15 +461,16 @@ def prune_one_layer(model, layer):
     del(layer.mlp.down_proj.lora_mask)
 
 
-def prune(model):
+def prune(model, granular_gqa=False):
     for layer_id, layer in enumerate(model.model.model.layers):
         logger.info("pruning layer {}".format(layer_id))
-        prune_one_layer(model, layer)
+        prune_one_layer(model, layer, granular_gqa=granular_gqa)
 
 
-def local_prune(model, s_dict, ratio, target_ratio):
+def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
     original_param_num = 0
     pruned_param_num = 0
+    _is_gqa = is_gqa_model(model)
     for name, module in model.named_modules():
         if _is_target_layer(module):
             original_param_num += np.prod(module.weight.shape)
@@ -441,7 +479,12 @@ def local_prune(model, s_dict, ratio, target_ratio):
             is_attn = weight_name in pruning_groups['self_attn']
             if weight_name in pruning_groups['block']:
                 continue
-            
+
+            # In granular GQA mode, k_proj/v_proj masks are derived from q_proj
+            # after the main loop — skip them here.
+            if granular_gqa and _is_gqa and weight_name in ["k_proj", "v_proj"]:
+                continue
+
             group_name = ".".join(name.split('.')[:-1])
 
             if not hasattr(module, 'lora_mask'):
@@ -454,8 +497,11 @@ def local_prune(model, s_dict, ratio, target_ratio):
             c_mask = module.lora_mask.data
             mask = torch.ones_like(c_mask)
 
-            # consider MHA/GQA
-            if is_gqa_model(model) and weight_name in ["q_proj", "k_proj", "v_proj"]:
+            # determine head count for reshaping
+            if granular_gqa and _is_gqa and weight_name in ["q_proj", "k_proj", "v_proj"]:
+                # granular mode: always use Q-head granularity
+                num_heads = model.config.num_attention_heads
+            elif _is_gqa and weight_name in ["q_proj", "k_proj", "v_proj"]:
                 num_heads = model.config.num_key_value_heads
             elif weight_name in ["q_proj", "k_proj", "v_proj"]:
                 num_heads = model.config.num_attention_heads
@@ -480,6 +526,21 @@ def local_prune(model, s_dict, ratio, target_ratio):
         else:
             if hasattr(module, 'weight'):
                 original_param_num += np.prod(module.weight.shape)
+
+    # Pass 2 (granular GQA only): derive k_proj/v_proj masks from updated q_proj masks.
+    # KV head i is kept iff at least one Q head in its group is still alive.
+    if granular_gqa and _is_gqa:
+        head_dim = model.config.hidden_size // model.config.num_attention_heads
+        num_q_per_kv = model.config.num_attention_heads // model.config.num_key_value_heads
+        for layer in model.model.model.layers:
+            q_proj = layer.self_attn.q_proj
+            if not hasattr(q_proj, 'lora_mask'):
+                continue
+            q_mask = q_proj.lora_mask.data.reshape(-1, head_dim)[:, 0]            # (num_q_heads,)
+            kv_mask = q_mask.reshape(-1, num_q_per_kv).any(dim=1).float()       # (num_kv_heads, num_q_per_kv) → any → (num_kv_heads,)
+            kv_mask_full = kv_mask.repeat_interleave(head_dim)
+            layer.self_attn.k_proj.lora_mask.data = kv_mask_full
+            layer.self_attn.v_proj.lora_mask.data = kv_mask_full
 
     logger.info("pruned/original parameters number:{:3f}/{:3f}  ratio:{:3f}".format(pruned_param_num*1e-9,
                                                                                original_param_num*1e-9,
@@ -506,8 +567,8 @@ def schedule_sparsity_ratio(
     return sparsity
 
 
-def prune_from_checkpoint(model):
-    prune(model)
+def prune_from_checkpoint(model, granular_gqa=False):
+    prune(model, granular_gqa=granular_gqa)
 
 
 def print_trainable_parameters(model):

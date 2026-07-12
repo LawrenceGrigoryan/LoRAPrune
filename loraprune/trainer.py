@@ -68,6 +68,7 @@ class LoRAPruneTrainer(Trainer):
                  prune_freq,
                  prune_metric,
                  adaptive_ema: bool = False,
+                 granular_gqa: bool = False,
                  ):
         super().__init__(model=model,
                          train_dataset=train_dataset,
@@ -82,6 +83,7 @@ class LoRAPruneTrainer(Trainer):
         self.prune_freq = prune_freq
         self.prune_metric = prune_metric
         self.adaptive_ema = adaptive_ema
+        self.granular_gqa = granular_gqa
 
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
@@ -263,9 +265,9 @@ class LoRAPruneTrainer(Trainer):
         if self.prune_metric == 'grad':
             utils.unfreeze(model)
 
-        sensitivity_dict = utils.init_sensitivity_dict(model)
+        sensitivity_dict = utils.init_sensitivity_dict(model, granular_gqa=self.granular_gqa)
         if self.adaptive_ema:
-            var_dict, alpha_dict, count_dict = utils.init_adaptive_ema_state(model)
+            var_dict, alpha_dict, count_dict = utils.init_adaptive_ema_state(model, granular_gqa=self.granular_gqa)
         else:
             var_dict = alpha_dict = count_dict = None
         for epoch in range(epochs_trained, num_train_epochs):
@@ -389,6 +391,7 @@ class LoRAPruneTrainer(Trainer):
                             var_dict=var_dict,
                             alpha_dict=alpha_dict,
                             count_dict=count_dict,
+                            granular_gqa=self.granular_gqa,
                         )
                     ratio = utils.schedule_sparsity_ratio(self.state.global_step, self.state.max_steps,
                                                           self.warmup_iters,
@@ -396,7 +399,7 @@ class LoRAPruneTrainer(Trainer):
 
                     # ratio = 0.05
                     if (self.state.global_step) % self.prune_freq == 0 and ratio > self.init_ratio and ratio < self.ratio:
-                        utils.local_prune(model, sensitivity_dict, ratio, self.ratio)
+                        utils.local_prune(model, sensitivity_dict, ratio, self.ratio, granular_gqa=self.granular_gqa)
 
                     optimizer_was_run = True
                     if self.deepspeed:

@@ -49,6 +49,7 @@ def train(
     prune_freq: int = 10,
     prune_metric: str = 'lora',  # options: lora|grad|magnitude
     adaptive_ema: bool = False,  # use per-group variance-adaptive EMA instead of fixed 0.9/0.1
+    granular_gqa: bool = False,  # prune Q heads independently; remove KV head only when all Q heads in its group are gone
     # lora hyperparams
     lora_r: int = 8,
     lora_alpha: int = 16,
@@ -237,6 +238,7 @@ def train(
         prune_freq=prune_freq,
         prune_metric=prune_metric,
         adaptive_ema=adaptive_ema,
+        granular_gqa=granular_gqa,
     )
 
     model.config.use_cache = False
