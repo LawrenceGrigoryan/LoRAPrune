@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=loraprune_test
-#SBATCH --output=./logs/loraprune_llama3-coupled-gqa-test_%j.log
-#SBATCH --error=./logs/loraprune_llama3-coupled-gqa-test_%j.err
+#SBATCH --output=./logs/loraprune_llama3-granular-gqa-test_%j.log
+#SBATCH --error=./logs/loraprune_llama3-granular-gqa-test_%j.err
 #SBATCH --mail-user=REPLACE_USER_NAME@uni-hildesheim.de
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
@@ -9,7 +9,7 @@
 srun python prune.py \
     --base_model "./models/meta_llama_Llama-3.2-1B" \
     --data_path './data/allenai___c4_120k' \
-    --output_dir 'outputs_dir/llama3-coupled-gqa-test' \
+    --output_dir 'outputs_dir/llama3-granular-gqa-test' \
     --num_epochs 2 \
     --batch_size 128 \
     --micro_batch_size 1 \
@@ -28,4 +28,5 @@ srun python prune.py \
     --prune_freq 10 \
     --fp16 False \
     --adaptive_ema False \
+    --granular_gqa True \
 
