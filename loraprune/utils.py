@@ -540,7 +540,8 @@ def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
             kv_mask = q_mask.reshape(-1, num_q_per_kv).any(dim=1).float()       # (num_kv_heads, num_q_per_kv) → any → (num_kv_heads,)
             kv_mask_full = kv_mask.repeat_interleave(head_dim)
             layer.self_attn.k_proj.lora_mask.data = kv_mask_full
-            layer.self_attn.v_proj.lora_mask.data = kv_mask_full
+            # v_proj gets its own tensor instead of sharing memory with k_proj.lora_mask
+            layer.self_attn.v_proj.lora_mask.data = kv_mask_full.clone()
 
     logger.info("pruned/original parameters number:{:3f}/{:3f}  ratio:{:3f}".format(pruned_param_num*1e-9,
                                                                                original_param_num*1e-9,
