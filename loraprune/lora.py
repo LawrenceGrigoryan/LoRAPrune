@@ -489,8 +489,8 @@ class Linear(nn.Linear, LoraLayer):
                     transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
                 )
             self.merged = True
-        elif self.merge_weights and self.merged:
-            # Make sure that the weights are not merged
+        elif mode and self.merge_weights and self.merged:
+            # Make sure that the weights are not merged (only when going back to training mode)
             if self.r > 0:
                 self.weight.data -= (
                     transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
