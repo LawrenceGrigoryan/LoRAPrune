@@ -570,6 +570,15 @@ def schedule_sparsity_ratio(
 
 def prune_from_checkpoint(model, granular_gqa=False):
     prune(model, granular_gqa=granular_gqa)
+    free_lora_tensors(model)
+    
+
+def free_lora_tensors(model):
+    for module in model.modules():
+        if hasattr(module, 'lora_A'):
+            del module.lora_A
+            del module.lora_B
+    torch.cuda.empty_cache()
 
 
 def print_trainable_parameters(model):
