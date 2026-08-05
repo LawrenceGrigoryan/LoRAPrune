@@ -28,6 +28,7 @@ dependencies = [
     "ipykernel>=7.3.0",
     "ipywidgets>=8.1.8",
     "pytest>=9.1.0",
+    "dotenv>=0.9.9",
 ]
 
 [tool.uv]
