@@ -71,7 +71,7 @@ def main(
     )
 
     tokenizer = AutoTokenizer.from_pretrained(base_model, legacy=False)
-    prepare_tokenizer(tokenizer, model.config.model_type)
+    prepare_tokenizer(tokenizer, model.config.model_type, mode="inference")
 
     logger.info(f"Model dtype: {model.dtype}")
     total_params = sum(p.numel() for p in model.parameters())

@@ -61,7 +61,7 @@ def main(base_model: str = "",
     logger.info(f"Total model parameters: {total_params}")
     model_type = model.config.model_type
     if lora_weights:
-        prepare_tokenizer(tokenizer, model_type)
+        prepare_tokenizer(tokenizer, model_type, mode="inference")
 
         config = LoraConfig(
             r=lora_r,
