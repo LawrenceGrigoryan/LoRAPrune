@@ -98,7 +98,7 @@ def main(base_model: str = "",
 
     # MCQ - multiple choice question evaluation, llm as a judge possible as well
     eval_dataset = load_dataset(f"{os.getenv('HF_DATASETS_CACHE')}/nvidia___when2_call", split="test")
-    if model_type == "qwen2":
+    if model_type in ["qwen2", "qwen3"]:
         dataset_prep = process_docs_qwen2_5(eval_dataset)
     elif model_type == "llama":
         dataset_prep = process_docs_llama3_2(eval_dataset)

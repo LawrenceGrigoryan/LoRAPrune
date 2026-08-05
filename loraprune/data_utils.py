@@ -84,7 +84,6 @@ def generate_and_tokenize_prompt(data_point: dict, tokenizer: AutoTokenizer, mod
                 messages,
                 tokenize=False,
                 add_generation_prompt=False,
-                enable_thinking=False,
             )
             tokenized_full_prompt = tokenize(full_prompt, tokenizer, cutoff_len=cutoff_len-1, add_eos_token=False)
             assistant_bos = "<|start_header_id|>assistant<|end_header_id|>\n\n"

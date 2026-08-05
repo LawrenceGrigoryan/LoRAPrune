@@ -53,7 +53,9 @@ def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8,
         torch_dtype=torch.float16,
     )
     tokenizer = AutoTokenizer.from_pretrained(adapter_id or model_id)
-    
+    tokenizer.padding_side = "left"  # required for batched causal LM eval
+    model.resize_token_embeddings(len(tokenizer))  # Qwen adds <|pad|> token
+
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Total parameters before pruning: {total_params}")
     
