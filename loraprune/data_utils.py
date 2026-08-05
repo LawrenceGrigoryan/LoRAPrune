@@ -2,12 +2,12 @@ from transformers import AutoTokenizer
 from loguru import logger
 
 
-def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str) -> None:
+def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str, mode: str = "train") -> None:
     """
     Prepare tokenizer in-place
     """
     # FIXME: switch to sequence packing
-    tokenizer.padding_side = "left"  # Allow batched inference
+    tokenizer.padding_side = "right"  if mode == "train" else "left"
     if model_type == "llama":  # llama-3.2-1b
         tokenizer.pad_token_id = 128004  # set to <|finetune_right_pad_id|>, different from eos
     elif model_type in ["qwen2", "qwen3"]:  # qwen-1.5-0.5b/qwen-3-0.6b
