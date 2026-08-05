@@ -125,17 +125,20 @@ def main(
         ppl = llama_eval(model, loader, device)
         return ppl
 
+    WARMUP = 5
+
     @torch.no_grad()
     def llama_eval(model, loader, device):
         nlls = []
 
         model.eval()
         with torch.inference_mode():
-            for batch in loader:
+            for i, batch in enumerate(loader):
                 batch = batch.to(device)
                 t1 = time.time()
                 output = model(batch)
-                times.append(time.time() - t1)
+                if i >= WARMUP:
+                    times.append(time.time() - t1)
                 lm_logits = output.logits
 
                 shift_logits = lm_logits[:, :-1, :].contiguous()
