@@ -195,7 +195,7 @@ def train(
         )
     else:
         train_data = (
-            data["train"].shuffle()
+            data["train"].shuffle().select(range(train_set_size))
             .map(generate_and_tokenize_prompt_partial)
             .filter(lambda x: x["input_ids"] is not None)
         )
