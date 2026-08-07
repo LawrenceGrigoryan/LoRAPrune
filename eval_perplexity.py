@@ -51,16 +51,23 @@ def main(
             "up_proj"
         ],
     lora_weights: str | None = None,
-    cutoff_len: int = 128
+    cutoff_len: int = 128,
+    granular_gqa: bool = False,
 ):
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
 
     logger.info(
-        f"Parameters: base_model={base_model!r}, lora_r={lora_r}, lora_alpha={lora_alpha}, "
-        f"lora_dropout={lora_dropout}, lora_target_modules={lora_target_modules}, "
-        f"lora_weights={lora_weights!r}, cutoff_len={cutoff_len}"
+        "Parameters:\n"
+        f"  base_model={base_model!r}\n"
+        f"  lora_r={lora_r}\n"
+        f"  lora_alpha={lora_alpha}\n"
+        f"  lora_dropout={lora_dropout}\n"
+        f"  lora_target_modules={lora_target_modules}\n"
+        f"  lora_weights={lora_weights!r}\n"
+        f"  cutoff_len={cutoff_len}\n"
+        f"  granular_gqa={granular_gqa}"
     )
     logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
@@ -100,7 +107,7 @@ def main(
         model.to(device)
         
         freeze(model)
-        prune_from_checkpoint(model)
+        prune_from_checkpoint(model, granular_gqa=granular_gqa)
         
         total_params_pruned = sum(p.numel() for p in model.parameters())
         logger.info(f"Total model parameters after pruning: {total_params_pruned}")
