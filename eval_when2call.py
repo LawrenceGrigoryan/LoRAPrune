@@ -43,11 +43,23 @@ def main(base_model: str = "",
                 "up_proj"
             ],
         lora_weights: str | None = None,
-        output_dir: str = "./outputs_dir/evaluation/results/") -> None:
+        output_dir: str = "./outputs_dir/evaluation/results/",
+        granular_gqa: bool = False) -> None:
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
 
+    logger.info(
+        "Parameters:\n"
+        f"  base_model={base_model!r}\n"
+        f"  lora_r={lora_r}\n"
+        f"  lora_alpha={lora_alpha}\n"
+        f"  lora_dropout={lora_dropout}\n"
+        f"  lora_target_modules={lora_target_modules}\n"
+        f"  lora_weights={lora_weights!r}\n"
+        f"  output_dir={output_dir!r}\n"
+        f"  granular_gqa={granular_gqa}"
+    )
     logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
@@ -86,7 +98,7 @@ def main(base_model: str = "",
         model.to(device)
         
         freeze(model)
-        prune_from_checkpoint(model)
+        prune_from_checkpoint(model, granular_gqa=granular_gqa)
         
         total_params_pruned = sum(p.numel() for p in model.parameters())
         logger.info(f"Total model parameters after pruning: {total_params_pruned}")
@@ -120,7 +132,7 @@ def main(base_model: str = "",
         result.append({"gold": correct_choice, "predicted": predicted_choice})
 
     adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else "base"
-    save_path = os.path.join(output_dir, adapter_name, "commonsense.json")
+    save_path = os.path.join(output_dir, adapter_name, "when2call.json")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "w") as f:
         for item in result:

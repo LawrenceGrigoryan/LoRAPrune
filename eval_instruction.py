@@ -24,7 +24,7 @@ except:
     pass
 
 
-def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8, limit: int = None, output_dir: str = "./evaluation/") -> None:
+def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8, limit: int = None, output_dir: str = "./evaluation/", granular_gqa: bool = False) -> None:
     """Evaluate a (optionally LoRA-pruned) chat/instruction LM on instruction following benchmarks.
 
     Runs lm-evaluation-harness on IFEVAl, logging per-task accuracy and the macro-average across subtasks.
@@ -40,12 +40,15 @@ def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8,
             ``{output_dir}/{adapter_id}/instruction.json``.
     """
     logger.info(
-        f"Evaluation with params:\n"
-        f"Base model: {model_id}\n"
-        f"Adapter: {adapter_id}\n"
-        f"Batch_size: {batch_size}\n"
-        f"Limit: {limit}\n"
+        "Parameters:\n"
+        f"  model_id={model_id!r}\n"
+        f"  adapter_id={adapter_id!r}\n"
+        f"  batch_size={batch_size}\n"
+        f"  limit={limit}\n"
+        f"  output_dir={output_dir!r}\n"
+        f"  granular_gqa={granular_gqa}"
     )
+    logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         load_in_8bit=False,
@@ -78,7 +81,7 @@ def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8,
         model.to(device)
 
         freeze(model)
-        prune_from_checkpoint(model)
+        prune_from_checkpoint(model, granular_gqa=granular_gqa)
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info(f"Total parameters after pruning: {total_params}")
