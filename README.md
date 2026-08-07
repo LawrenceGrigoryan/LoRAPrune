@@ -2,6 +2,12 @@
 <img src="figures/logo.png" width="20%"> <br>
 </p>
 
+## Cluster
+
+To view full names of running cluster jobs:
+```bash
+squeue -u grigorianl -o "%.18i %.9P %.100j %.8u %.2t %.10M %.6D %R"
+```
 
 
 
