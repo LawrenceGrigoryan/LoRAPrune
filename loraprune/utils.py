@@ -405,7 +405,8 @@ def prune_fp16_module(model, module, mask, transpose):
 
 def prune_one_layer(model, layer, granular_gqa=False):
     is_gqa = is_gqa_model(model)
-    head_dim = model.config.hidden_size // model.config.num_attention_heads
+    # Qwen3 sets head_dim explicitly and it differs from hidden_size // num_attention_heads.
+    head_dim = getattr(model.config, "head_dim", None) or model.config.hidden_size // model.config.num_attention_heads
 
     # self_attn
     # torch stores weights in [out_features, in_features]
@@ -530,7 +531,7 @@ def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
     # Pass 2 (granular GQA only): derive k_proj/v_proj masks from updated q_proj masks.
     # KV head i is kept iff at least one Q head in its group is still alive.
     if granular_gqa and _is_gqa:
-        head_dim = model.config.hidden_size // model.config.num_attention_heads
+        head_dim = getattr(model.config, "head_dim", None) or model.config.hidden_size // model.config.num_attention_heads
         num_q_per_kv = model.config.num_attention_heads // model.config.num_key_value_heads
         for layer in model.model.model.layers:
             q_proj = layer.self_attn.q_proj
