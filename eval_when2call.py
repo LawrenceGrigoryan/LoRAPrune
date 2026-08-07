@@ -16,7 +16,7 @@ from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
 from loraprune.data_utils import prepare_tokenizer
 from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
-from evaluation.utils import compute_loglikelihood
+from evaluation.utils import compute_loglikelihood, seed_everything
 
 load_dotenv()
 
@@ -44,7 +44,9 @@ def main(base_model: str = "",
             ],
         lora_weights: str | None = None,
         output_dir: str = "./outputs_dir/evaluation/results/",
-        granular_gqa: bool = False) -> None:
+        granular_gqa: bool = False,
+        num_samples: int | None = None,
+        seed: int = 42) -> None:
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='decapoda-research/llama-7b-hf'"
@@ -58,8 +60,11 @@ def main(base_model: str = "",
         f"  lora_target_modules={lora_target_modules}\n"
         f"  lora_weights={lora_weights!r}\n"
         f"  output_dir={output_dir!r}\n"
-        f"  granular_gqa={granular_gqa}"
+        f"  granular_gqa={granular_gqa}\n"
+        f"  num_samples={num_samples}\n"
+        f"  seed={seed}"
     )
+    seed_everything(seed)
     logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
@@ -110,6 +115,9 @@ def main(base_model: str = "",
 
     # MCQ - multiple choice question evaluation, llm as a judge possible as well
     eval_dataset = load_dataset(f"{os.getenv('HF_DATASETS_CACHE')}/nvidia___when2_call", split="test")
+    if num_samples is not None and num_samples < len(eval_dataset):
+        eval_dataset = eval_dataset.shuffle(seed=seed).select(range(num_samples))
+        logger.info(f"Sampled {num_samples} examples with seed={seed}")
     if model_type in ["qwen2", "qwen3"]:
         dataset_prep = process_docs_qwen2_5(eval_dataset)
     elif model_type == "llama":

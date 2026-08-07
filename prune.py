@@ -1,11 +1,9 @@
 import json
 import os
-import random
 from typing import List
 from functools import partial
 
 import fire
-import numpy as np
 import torch
 import transformers
 from transformers import DataCollatorForSeq2Seq
@@ -15,6 +13,7 @@ from loraprune.utils import freeze, is_gqa_model
 from loraprune.lora import LoraConfig
 from loraprune.peft_model import get_peft_model
 from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt
+from evaluation.utils import seed_everything
 from loguru import logger
 from safetensors.torch import save_file as safe_save_file
 
@@ -76,10 +75,7 @@ def train(
     params = locals()
     logger.info("Pruning with params:\n" + "\n".join(f"  {k}: {v}" for k, v in params.items()))
 
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    seed_everything(seed)
 
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "train_params.json"), "w") as f:

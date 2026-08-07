@@ -11,6 +11,7 @@ from lm_eval.models.huggingface import HFLM
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
+from evaluation.utils import seed_everything
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -24,7 +25,7 @@ except:
     pass
 
 
-def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8, limit: int = None, output_dir: str = "./evaluation/", granular_gqa: bool = False) -> None:
+def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8, limit: int = None, output_dir: str = "./evaluation/", granular_gqa: bool = False, seed: int = 42) -> None:
     """Evaluate a (optionally LoRA-pruned) chat/instruction LM on instruction following benchmarks.
 
     Runs lm-evaluation-harness on IFEVAl, logging per-task accuracy and the macro-average across subtasks.
@@ -46,8 +47,10 @@ def eval_instruction(model_id: str, adapter_id: str = None, batch_size: int = 8,
         f"  batch_size={batch_size}\n"
         f"  limit={limit}\n"
         f"  output_dir={output_dir!r}\n"
-        f"  granular_gqa={granular_gqa}"
+        f"  granular_gqa={granular_gqa}\n"
+        f"  seed={seed}"
     )
+    seed_everything(seed)
     logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         model_id,

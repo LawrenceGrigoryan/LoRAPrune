@@ -15,6 +15,7 @@ from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
 from loraprune.data_utils import prepare_tokenizer
+from evaluation.utils import seed_everything
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -53,6 +54,7 @@ def main(
     lora_weights: str | None = None,
     cutoff_len: int = 128,
     granular_gqa: bool = False,
+    seed: int = 42,
 ):
     assert (
         base_model
@@ -67,8 +69,10 @@ def main(
         f"  lora_target_modules={lora_target_modules}\n"
         f"  lora_weights={lora_weights!r}\n"
         f"  cutoff_len={cutoff_len}\n"
-        f"  granular_gqa={granular_gqa}"
+        f"  granular_gqa={granular_gqa}\n"
+        f"  seed={seed}"
     )
+    seed_everything(seed)
     logger.info(f"Using device: `{device}`")
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
