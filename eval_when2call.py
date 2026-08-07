@@ -32,6 +32,19 @@ except:
     pass
 
 
+def _macro_f1(gold: list[str], pred: list[str]) -> float:
+    labels = sorted(set(gold) | set(pred))
+    f1s = []
+    for label in labels:
+        tp = sum(g == label and p == label for g, p in zip(gold, pred))
+        fp = sum(g != label and p == label for g, p in zip(gold, pred))
+        fn = sum(g == label and p != label for g, p in zip(gold, pred))
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1s.append(2 * precision * recall / (precision + recall) if (precision + recall) else 0.0)
+    return sum(f1s) / len(f1s) if f1s else 0.0
+
+
 def main(base_model: str = "",
         lora_r: int = 8,
         lora_alpha: int = 16,
@@ -129,15 +142,22 @@ def main(base_model: str = "",
     result = []
     for i in tqdm(range(len(dataset_prep))):
         sample = dataset_prep[i]
-        choices = sample["answers"]
-        correct_choice = sample["correct_answer"]
-        answer_loglikelihoods = {}
-        for type, choice in choices.items():
-            prompt = f"{sample['prompt']} {choice}{tokenizer.eos_token}"
-            ll = compute_loglikelihood(prompt, model, tokenizer)
-            answer_loglikelihoods[type] = ll / len(tokenizer(prompt).input_ids)
-        predicted_choice = max(answer_loglikelihoods, key=lambda x: answer_loglikelihoods.get(x))
-        result.append({"gold": correct_choice, "predicted": predicted_choice})
+        choices = sample["choices"]
+        target_index = sample["target_index"]
+        answer_types = list(sample["answers"].keys())
+        lls = []
+        lls_norm = []
+        for choice in choices:
+            ll, n_cont = compute_loglikelihood(sample["prompt"], choice, model, tokenizer)
+            lls.append(ll)
+            lls_norm.append(ll / n_cont)
+        pred_idx = max(range(len(choices)), key=lambda idx: lls[idx])
+        pred_idx_norm = max(range(len(choices)), key=lambda idx: lls_norm[idx])
+        result.append({
+            "gold": answer_types[target_index],
+            "predicted": answer_types[pred_idx],
+            "predicted_norm": answer_types[pred_idx_norm],
+        })
 
     adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else "base"
     save_path = os.path.join(output_dir, adapter_name, "when2call.json")
@@ -146,8 +166,14 @@ def main(base_model: str = "",
         for item in result:
             f.write(json.dumps(item) + "\n")
 
-    acc = sum([item["gold"] == item["predicted"] for item in result]) / len(result)
-    logger.info(f"Accuracy: {acc:.4f}")
+    acc = sum(item["gold"] == item["predicted"] for item in result) / len(result)
+    acc_norm = sum(item["gold"] == item["predicted_norm"] for item in result) / len(result)
+    macro_f1 = _macro_f1([r["gold"] for r in result], [r["predicted"] for r in result])
+    macro_f1_norm = _macro_f1([r["gold"] for r in result], [r["predicted_norm"] for r in result])
+    logger.info(f"acc:           {acc:.4f}")
+    logger.info(f"acc_norm:      {acc_norm:.4f}")
+    logger.info(f"macro_f1:      {macro_f1:.4f}")
+    logger.info(f"macro_f1_norm: {macro_f1_norm:.4f}")
     
 
 if __name__ == "__main__":
