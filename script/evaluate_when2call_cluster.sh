@@ -6,11 +6,18 @@
 #SBATCH --partition=STUD
 #SBATCH --gres=gpu:1
 
-srun python eval_when2call.py \
+export HF_DATASETS_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_CACHE="./data/benchmarks/"
+
+srun python ./eval_when2call.py \
     --base_model "./models/Qwen_Qwen1.5-0.5B-Chat" \
-    # --lora_weights "./outputs_dir/qwen15_05b_chat_lamini_20k/" \
+    --lora_weights "./outputs_dir/qwen15_05b_chat_lamini_20k/" \
     --lora_r 8 \
     --lora_alpha 16 \
     --lora_dropout 0.0 \
     --lora_target_modules "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj" \
-    --output_dir "./outputs_dir/evaluation/results"
+    --output_dir "./outputs_dir/evaluation/results/" \
+    --granular_gqa False \
+    --num_samples 500 \
+    --seed 42

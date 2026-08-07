@@ -1,6 +1,6 @@
-CUDA_VISIBLE_DEVICES=0 python inference.py \
-    --base_model "meta-llama/Llama-3.1-8B-Instruct" \
-    --lora_weights 'outputs_dir' \
+CUDA_VISIBLE_DEVICES=0 python ./eval_perplexity.py \
+    --base_model "Qwen/Qwen1.5-0.5B" \
+    --lora_weights 'outputs_dir/qwen1.5-0.5b-base-10k' \
     --cutoff_len 512 \
     --lora_r 8 \
     --lora_alpha 16 \
