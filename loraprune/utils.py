@@ -444,6 +444,16 @@ def prune_one_layer(model, layer, granular_gqa=False):
     layer.self_attn.num_key_value_heads = (
         layer.self_attn.k_proj.out_features // head_dim
     )
+    # repeat_kv reads num_key_value_groups from the module (set once in
+    # __init__ from the original config). After pruning, Q/KV counts change,
+    # so refresh it — otherwise SDPA expands K/V by the stale factor and
+    # crashes with a head-count mismatch. For MHA (num_kv_heads == num_heads)
+    # this stays 1; for GQA with uniform per-group pruning (including the
+    # granular_gqa path) num_heads is always divisible by num_key_value_heads.
+    if layer.self_attn.num_key_value_heads > 0:
+        layer.self_attn.num_key_value_groups = (
+            layer.self_attn.num_heads // layer.self_attn.num_key_value_heads
+        )
 
     ## mlp
     prune_fp16_module(model, layer.mlp.gate_proj, layer.mlp.gate_proj.lora_mask, False)
@@ -517,9 +527,34 @@ def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
             need_prune_num = int(total_num * ratio)
             # set already pruned weights' importances to 0
             importance = s_dict[group_name] * c_mask
-            # the rest slots are new weights with lowest imporance to be pruned
-            can_prune = torch.argsort(importance)[:need_prune_num]
-            mask[can_prune] = 0
+
+            # Granular GQA on q_proj: enforce uniform per-KV-group pruning so
+            # every surviving KV head serves the same number of surviving Q
+            # heads. Without this, standard GQA's repeat_kv (single scalar
+            # n_rep) cannot express a variable Q-per-KV mapping and attention
+            # forward crashes with a head-count mismatch.
+            if granular_gqa and _is_gqa and weight_name == "q_proj":
+                num_kv_heads = model.config.num_key_value_heads
+                num_q_per_kv = model.config.num_attention_heads // num_kv_heads
+                # Floor: quantizes effective ratio to multiples of num_kv_heads.
+                # Cap at num_q_per_kv so we don't ask for more per group than exists.
+                per_group = min(need_prune_num // num_kv_heads, num_q_per_kv)
+                if per_group > 0:
+                    imp_grouped = importance.reshape(num_kv_heads, num_q_per_kv)
+                    # topk with largest=False picks the lowest-importance Q heads
+                    # in each group; already-pruned slots (importance 0) are
+                    # selected first, matching the global-argsort behavior.
+                    _, idx = torch.topk(imp_grouped, per_group, dim=1, largest=False)
+                    row_offsets = (
+                        torch.arange(num_kv_heads, device=idx.device).unsqueeze(1)
+                        * num_q_per_kv
+                    )
+                    can_prune = (idx + row_offsets).flatten()
+                    mask[can_prune] = 0
+            else:
+                # the rest slots are new weights with lowest imporance to be pruned
+                can_prune = torch.argsort(importance)[:need_prune_num]
+                mask[can_prune] = 0
 
             if is_attn:
                 mask = (mask.new_ones(module.lora_mask.shape).reshape(-1, head_dim) * mask.unsqueeze(1)).reshape(-1)
