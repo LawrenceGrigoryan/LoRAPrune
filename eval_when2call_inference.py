@@ -185,7 +185,7 @@ def _generate_batch(
                 "finished_with_eos": finished,
             }
         )
-        logger.info(f"Prompt: {tokenizer.decode(encoded['input_ids'][0], skip_special_tokens=True)}")
+        logger.info(f"Prompt: {tokenizer.decode(encoded['input_ids'][0])}")
         logger.info(f"Response: {results[-1]['model_response']}")
     return results
 
