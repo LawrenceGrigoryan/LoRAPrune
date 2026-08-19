@@ -132,7 +132,7 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
         logger.info(f"{name} avg: {avg:.4f}")
         output[name] = {**task_accs, "avg": avg}
 
-    adapter_name = os.path.basename(os.path.normpath(adapter_id)) if adapter_id else "base"
+    adapter_name = os.path.basename(os.path.normpath(adapter_id)) if adapter_id else os.path.basename(os.path.normpath(model_id))
     save_path = os.path.join(output_dir, adapter_name, "commonsense.json")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "w") as f:

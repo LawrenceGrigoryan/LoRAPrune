@@ -112,7 +112,7 @@ def eval_instruction(model_id: str, lora_weights: str = None, batch_size: int = 
         logger.info(f"{task} prompt_level_strict_acc: {prompt_acc:.4f}")
         logger.info(f"{task} inst_level_strict_acc: {inst_acc:.4f}")
 
-    adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else "base"
+    adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else os.path.basename(os.path.normpath(model_id))
     save_path = os.path.join(output_dir, adapter_name, "instruction.json")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "w") as f:

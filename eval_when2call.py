@@ -159,7 +159,7 @@ def main(base_model: str = "",
             "predicted_norm": answer_types[pred_idx_norm],
         })
 
-    adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else base_model
+    adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else os.path.basename(os.path.normpath(base_model))
     save_path = os.path.join(output_dir, adapter_name, "when2call.json")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "w") as f:
