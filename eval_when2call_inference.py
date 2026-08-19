@@ -169,7 +169,7 @@ def _generate_batch(
 
     stop_set = set(stop_ids)
     results = []
-    for row in outputs[:, prompt_len:]:
+    for idx, row in enumerate(outputs[:, prompt_len:]):
         token_ids = row.tolist()
         # Cut at the first stop token; everything past it is padding.
         cut, finished = len(token_ids), False
@@ -185,7 +185,7 @@ def _generate_batch(
                 "finished_with_eos": finished,
             }
         )
-        logger.info(f"Prompt: {tokenizer.decode(encoded['input_ids'][0])}")
+        logger.info(f"Prompt: {tokenizer.decode(encoded['input_ids'][idx])}")
         logger.info(f"Response: {results[-1]['model_response']}")
     return results
 
