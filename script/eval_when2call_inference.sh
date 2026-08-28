@@ -1,5 +1,6 @@
 python ./eval_when2call_inference.py \
     --base_model "./models/Qwen_Qwen1.5-0.5B-Chat" \
+    --lora_weights "./outputs_dir/qwen1.5-0.5b-chat-10k" \
     --lora_r 8 \
     --lora_alpha 16 \
     --lora_dropout 0.0 \
@@ -9,4 +10,4 @@ python ./eval_when2call_inference.py \
     --batch_size 8 \
     --max_new_tokens 256 \
     --seed 42 \
-    --num_samples 2 \
+    --num_samples 5 \
