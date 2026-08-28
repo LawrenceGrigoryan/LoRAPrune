@@ -190,7 +190,7 @@ def _generate_batch(
     return results
 
 
-def main(
+def run_when2call_inference(
     base_model: str = "",
     lora_r: int = 8,
     lora_alpha: int = 16,
@@ -376,4 +376,4 @@ def main(
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(run_when2call_inference)

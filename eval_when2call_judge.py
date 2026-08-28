@@ -224,7 +224,7 @@ def summarize(results: list[dict]) -> dict:
     return summary
 
 
-def main(
+def run_when2call_judge(
     responses_path: str = "",
     results_path: str | None = None,
     judge_model: str = "gpt-4.1-mini",
@@ -344,4 +344,4 @@ def main(
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(run_when2call_judge)
