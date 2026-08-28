@@ -16,7 +16,7 @@ from typing import List
 
 import fire
 import torch
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from dotenv import load_dotenv
 from loguru import logger
 from peft.utils.save_and_load import load_peft_weights
