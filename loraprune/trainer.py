@@ -172,6 +172,36 @@ class LoRAPruneTrainer(Trainer):
             f"{adam_elems:,} elements for Adam ({lorapre_elems / adam_elems:.3f}x)"
         )
 
+    def _log_cuda_memory(self, tag):
+        """
+        Log CUDA memory usage.
+
+        Parameters
+        ----------
+        tag : str
+            Short label identifying where in training this reading was taken.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Peak allocation is the number that decides whether a run fits on the
+        card.  It moves less than the optimizer state alone does: LoRA-Pre
+        reconstructs ``m_B @ m_A`` into a transient ``p x q`` buffer each step,
+        giving back at peak some of what it saves in state.
+        """
+        if not torch.cuda.is_available():
+            return
+        mib = 1024**2
+        logger.info(
+            f"[{tag}] CUDA memory: "
+            f"allocated={torch.cuda.memory_allocated() / mib:.0f} MiB, "
+            f"peak={torch.cuda.max_memory_allocated() / mib:.0f} MiB, "
+            f"reserved={torch.cuda.memory_reserved() / mib:.0f} MiB"
+        )
+
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):
@@ -352,6 +382,12 @@ class LoRAPruneTrainer(Trainer):
         if self.prune_metric == 'grad':
             utils.unfreeze(model)
 
+        # Reset the peak counter so it measures the training loop rather than
+        # model loading; otherwise the optimizers are not comparable.
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+        self._log_cuda_memory("before training")
+
         sensitivity_dict = utils.init_sensitivity_dict(model, granular_gqa=self.granular_gqa)
         if self.adaptive_ema:
             var_dict, alpha_dict, count_dict = utils.init_adaptive_ema_state(model, granular_gqa=self.granular_gqa)
@@ -474,16 +510,22 @@ class LoRAPruneTrainer(Trainer):
                     if optimizer_was_run and not self.deepspeed:
                         self.lr_scheduler.step()
 
+                    # Optimizer state is allocated lazily on the first step, so
+                    # this is the earliest reading that includes it.
+                    if self.state.global_step == 0:
+                        self._log_cuda_memory("after first step")
+
                     model.zero_grad()
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1 + steps_skipped) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
-                    
+
                     _gs = self.state.global_step
                     if _gs % args.logging_steps == 0:
                         _gn = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else (grad_norm or 0.0)
                         _lr = self.optimizer.param_groups[0]['lr']
                         logger.info(f"[step={_gs}/{self.state.max_steps}], training loss={tr_loss_step.item():.4f}, grad_norm={_gn:.4f}, lr={_lr:.2e}")
+                        self._log_cuda_memory(f"step={_gs}")
                     
                     self._maybe_log_save_evaluate(tr_loss, grad_norm if grad_norm is not None else None, model, trial, epoch, ignore_keys_for_eval, start_time)
                 else:
@@ -511,6 +553,7 @@ class LoRAPruneTrainer(Trainer):
             delattr(self, "_past")
 
         logger.info("\n\nTraining completed. Do not forget to share your model on huggingface.co/models =)\n\n")
+        self._log_cuda_memory("end of training")
         if args.load_best_model_at_end and self.state.best_model_checkpoint is not None:
 
             self._load_best_model()
