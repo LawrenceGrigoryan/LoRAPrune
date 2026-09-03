@@ -1,6 +1,7 @@
 """Tests for loraprune/optimizer.py — the LoRA-Pre optimizer (arXiv:2602.24283)."""
 
 import math
+from unittest import mock
 
 import pytest
 import torch
@@ -177,6 +178,36 @@ def test_first_step_is_finite_despite_singular_gram():
     assert torch.isfinite(w).all()
     for key in ("m_B", "m_A", "v_B", "v_A"):
         assert torch.isfinite(state[key]).all(), key
+
+
+def test_solve_falls_back_to_cpu_when_backend_lacks_linalg_solve():
+    """MPS has no linalg.solve; the r x r system should move to CPU, not to SVD."""
+    torch.manual_seed(0)
+    gram = torch.randn(4, 8) @ torch.randn(8, 4)
+    gram = gram @ gram.T  # symmetric PSD
+    rhs = torch.randn(4, 3)
+    expected = LoRAPre._solve_spd(gram, rhs, 1e-6)
+
+    real_solve = torch.linalg.solve
+    calls = []
+
+    def fake_solve(a, b):
+        # Stand in for a backend that does not implement the op: fail once, the
+        # way MPS does, then let the CPU retry through.
+        calls.append(a.device.type)
+        if len(calls) == 1:
+            raise NotImplementedError("aten::_linalg_solve_ex.result not implemented")
+        return real_solve(a, b)
+
+    def no_pinv(*args, **kwargs):
+        raise AssertionError("fell back to SVD-based pinv instead of retrying on CPU")
+
+    with mock.patch.object(torch.linalg, "solve", fake_solve), \
+         mock.patch.object(torch.linalg, "pinv", no_pinv):
+        got = LoRAPre._solve_spd(gram, rhs, 1e-6)
+
+    assert len(calls) == 2, "expected exactly one retry after NotImplementedError"
+    assert torch.allclose(got, expected, atol=1e-6)
 
 
 def test_zero_damping_is_rejected():

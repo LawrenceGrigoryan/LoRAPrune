@@ -278,14 +278,22 @@ class LoRAPre(Optimizer):
         conditioned.  The systems are only ``r x r``, so the cost is negligible
         next to the ``p x q`` matmuls around it.
 
-        Falls back to an explicit pseudo-inverse if the factorisation fails,
-        which can happen in low precision or with a pathological Gram matrix.
+        Two fallbacks, for two different failures.  A backend that does not
+        implement ``linalg.solve`` at all (MPS, as of torch 2.5) is handled by
+        solving on the CPU: the system is only ``r x r``, so the round trip is
+        cheap and the result is identical.  A genuinely singular system -- which
+        damping should prevent, but low precision can still produce -- falls
+        back to an explicit pseudo-inverse.
         """
         rank = gram.shape[0]
         eye = torch.eye(rank, dtype=gram.dtype, device=gram.device)
         damped = gram + damping * eye
         try:
             return torch.linalg.solve(damped, rhs)
+        except NotImplementedError:
+            # Device gap, not a numerical problem. Must be caught before
+            # RuntimeError, which it subclasses.
+            return torch.linalg.solve(damped.cpu(), rhs.cpu()).to(rhs.device)
         except RuntimeError:
             # torch.linalg.solve raises on a singular system; pinv always works.
             return torch.linalg.pinv(damped) @ rhs
