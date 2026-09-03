@@ -11,6 +11,7 @@ from transformers.trainer import (
 )
 from transformers.trainer_callback import ExportableState
 import loraprune.utils as utils
+from loraprune.optimizer import LoRAPre
 import math
 import sys
 import time
@@ -49,6 +50,8 @@ class LoRAPruneTrainer(Trainer):
                  prune_metric,
                  adaptive_ema: bool = False,
                  granular_gqa: bool = False,
+                 optimizer_name: str = 'adamw_torch',
+                 lorapre_rank: int = 8,
                  ):
         super().__init__(model=model,
                          train_dataset=train_dataset,
@@ -64,6 +67,110 @@ class LoRAPruneTrainer(Trainer):
         self.prune_metric = prune_metric
         self.adaptive_ema = adaptive_ema
         self.granular_gqa = granular_gqa
+        self.optimizer_name = optimizer_name
+        self.lorapre_rank = lorapre_rank
+
+    def create_optimizer(self):
+        """
+        Build the optimizer, honouring the ``optimizer_name`` selection.
+
+        For anything other than ``'lorapre'`` this defers to the stock
+        ``Trainer.create_optimizer``, which reads ``args.optim`` as before.  For
+        ``'lorapre'`` it builds ``loraprune.optimizer.LoRAPre`` over the same two
+        decay/no-decay parameter groups the base class would have used, so the
+        only thing that changes is the update rule.
+
+        Returns
+        -------
+        torch.optim.Optimizer
+            The optimizer, also assigned to ``self.optimizer``.
+
+        Notes
+        -----
+        Adam hyperparameters come from ``TrainingArguments`` (``learning_rate``,
+        ``adam_beta1``, ``adam_beta2``, ``adam_epsilon``, ``weight_decay``) so
+        both optimizers are configured through one set of knobs.
+        """
+        if self.optimizer_name != 'lorapre':
+            return super().create_optimizer()
+
+        opt_model = self.model_wrapped if is_sagemaker_mp_enabled() else self.model
+
+        if self.optimizer is None:
+            # Same decay/no-decay split the base Trainer applies: no weight decay
+            # on biases and normalisation weights.
+            decay_parameters = self.get_decay_parameter_names(opt_model)
+            trainable = [(n, p) for n, p in opt_model.named_parameters() if p.requires_grad]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in trainable if n in decay_parameters],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in trainable if n not in decay_parameters],
+                    "weight_decay": 0.0,
+                },
+            ]
+            self.optimizer = LoRAPre(
+                optimizer_grouped_parameters,
+                lr=self.args.learning_rate,
+                betas=(self.args.adam_beta1, self.args.adam_beta2),
+                eps=self.args.adam_epsilon,
+                rank=self.lorapre_rank,
+            )
+            self._log_lorapre_coverage([p for _, p in trainable])
+
+        return self.optimizer
+
+    def _log_lorapre_coverage(self, params):
+        """
+        Report how many trainable tensors actually take LoRA-Pre's low-rank path.
+
+        Parameters
+        ----------
+        params : list of torch.Tensor
+            The trainable parameters handed to the optimizer.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Worth logging loudly because the answer is easy to get wrong: LoRA-Pre
+        only factorises a matrix when ``min(p, q) > lorapre_rank``.  With the
+        default ``prune_metric='lora'`` the trainable set is the LoRA adapters,
+        whose shapes are ``(lora_r, in)`` and ``(out, lora_r)``, so
+        ``min(p, q) == lora_r``.  Leaving ``lorapre_rank >= lora_r`` therefore
+        sends *every* tensor to the AdamW fallback and LoRA-Pre becomes a no-op.
+        """
+        low_rank = [p for p in params if LoRAPre.uses_low_rank(p, self.lorapre_rank)]
+        fallback = [p for p in params if not LoRAPre.uses_low_rank(p, self.lorapre_rank)]
+
+        logger.info(
+            f"LoRA-Pre optimizer (rank={self.lorapre_rank}): "
+            f"{len(low_rank)} tensors on the low-rank path, "
+            f"{len(fallback)} on the AdamW fallback"
+        )
+
+        if not low_rank:
+            logger.warning(
+                f"LoRA-Pre is a no-op: no trainable tensor has min(shape) > "
+                f"lorapre_rank={self.lorapre_rank}, so every one falls back to "
+                f"AdamW. With prune_metric='lora' the trainable tensors are the "
+                f"LoRA adapters, so lorapre_rank must be strictly below lora_r."
+            )
+            return
+
+        # Adam keeps two full moments per tensor; LoRA-Pre keeps four thin factors.
+        adam_elems = sum(2 * p.numel() for p in low_rank)
+        lorapre_elems = sum(
+            2 * (p.shape[0] + p.shape[1]) * self.lorapre_rank for p in low_rank
+        )
+        logger.info(
+            f"LoRA-Pre optimizer state on the low-rank path: {lorapre_elems:,} vs "
+            f"{adam_elems:,} elements for Adam ({lorapre_elems / adam_elems:.3f}x)"
+        )
 
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None

@@ -40,6 +40,10 @@ def train(
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
     val_set_size: int = 2000,
+    warmup_steps: int = 0,
+    # optimizer params
+    optimizer: str = 'adamw_torch',  # options: adamw_torch|lorapre
+    lorapre_rank: int = 8,  # rank of LoRA-Pre's momentum factorisation; must be < lora_r to have any effect
     # pruning hyperparams
     ratio: float = 0.5,
     init_ratio: float = 0,
@@ -74,6 +78,28 @@ def train(
 ):
     params = locals()
     logger.info("Pruning with params:\n" + "\n".join(f"  {k}: {v}" for k, v in params.items()))
+
+    supported_optimizers = ('adamw_torch', 'lorapre')
+    if optimizer not in supported_optimizers:
+        raise ValueError(
+            f"`{optimizer}` optimizer is not supported! Choose one of {supported_optimizers}."
+        )
+
+    if optimizer == 'lorapre':
+        if lorapre_rank >= lora_r:
+            # LoRA-Pre only factorises a matrix when min(shape) > rank, and the
+            # trainable adapters have min(shape) == lora_r. See
+            # LoRAPruneTrainer._log_lorapre_coverage.
+            raise ValueError(
+                f"lorapre_rank={lorapre_rank} must be strictly less than lora_r={lora_r}, "
+                f"otherwise every LoRA adapter falls back to AdamW and LoRA-Pre does nothing."
+            )
+        if warmup_steps == 0:
+            logger.warning(
+                "LoRA-Pre with warmup_steps=0: the algorithm's second moment is "
+                "under-estimated for the first few dozen steps, so early updates "
+                "overshoot. Consider setting warmup_steps > 0."
+            )
 
     seed_everything(seed)
 
@@ -205,11 +231,13 @@ def train(
             per_device_train_batch_size=micro_batch_size,
             per_device_eval_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            warmup_steps=0,
+            warmup_steps=warmup_steps,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=fp16,
             logging_steps=5,
+            # only consulted when optimizer != 'lorapre'; LoRAPruneTrainer.create_optimizer
+            # builds LoRA-Pre itself and ignores this field.
             optim="adamw_torch",
             eval_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="no",  # don't save with save_pretrained, results in a corrupted save
@@ -235,6 +263,8 @@ def train(
         prune_metric=prune_metric,
         adaptive_ema=adaptive_ema,
         granular_gqa=granular_gqa,
+        optimizer_name=optimizer,
+        lorapre_rank=lorapre_rank,
     )
 
     model.config.use_cache = False
