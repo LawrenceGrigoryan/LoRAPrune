@@ -174,6 +174,11 @@ def main(base_model: str = "",
     logger.info(f"acc_norm:      {acc_norm:.4f}")
     logger.info(f"macro_f1:      {macro_f1:.4f}")
     logger.info(f"macro_f1_norm: {macro_f1_norm:.4f}")
+
+    metrics_path = os.path.join(output_dir, adapter_name, "when2call_mcq.json")
+    with open(metrics_path, "w") as f:
+        json.dump({"acc": acc, "acc_norm": acc_norm, "macro_f1": macro_f1, "macro_f1_norm": macro_f1_norm}, f, indent=2)
+    logger.info(f"Results saved to {metrics_path}")
     
 
 if __name__ == "__main__":
