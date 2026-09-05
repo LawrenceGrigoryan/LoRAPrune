@@ -12,7 +12,7 @@ from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze, is_gqa_model
 from loraprune.lora import LoraConfig
 from loraprune.peft_model import get_peft_model
-from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt
+from loraprune.data_utils import prepare_tokenizer, generate_and_tokenize_prompt, normalize_schema
 from evaluation.utils import seed_everything
 from loguru import logger
 from safetensors.torch import save_file as safe_save_file
@@ -194,6 +194,11 @@ def train(
     except Exception as e:
         logger.warning(f"Error occurred while loading dataset: {e}")
         data = load_dataset(data_path)
+
+    # the SFT path reads `instruction`/`response`; train_on_inputs does plain
+    # next-token prediction on `text` and needs no normalisation
+    if not train_on_inputs:
+        data = normalize_schema(data)
 
     freeze(model)
     model.print_trainable_parameters()  # Be more transparent about the % of trainable params.

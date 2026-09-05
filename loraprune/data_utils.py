@@ -1,5 +1,43 @@
+from datasets import Dataset, DatasetDict
 from transformers import AutoTokenizer
 from loguru import logger
+
+# generate_and_tokenize_prompt expects LaMini-instruction's schema
+SFT_COLUMNS = ("instruction", "response")
+# alpaca-gpt4 (vicgalle/alpaca-gpt4) and friends
+ALPACA_COLUMNS = ("instruction", "input", "output")
+
+
+def _alpaca_to_sft(data_point: dict) -> dict:
+    # `input` is an optional extra context field, populated for roughly 40% of
+    # alpaca rows; fold it into the user turn so it isn't silently dropped
+    instruction = data_point["instruction"]
+    if data_point["input"]:
+        instruction = instruction + f"\nInput: {data_point['input']}"
+    return {"instruction": instruction, "response": data_point["output"]}
+
+
+def normalize_schema(data: Dataset | DatasetDict) -> Dataset | DatasetDict:
+    """
+    Rewrite instruction-tuning datasets into the `instruction`/`response` schema
+    that generate_and_tokenize_prompt expects. Datasets already in that schema
+    are returned untouched.
+    """
+    split = next(iter(data.values())) if isinstance(data, DatasetDict) else data
+    columns = split.column_names
+
+    if all(c in columns for c in SFT_COLUMNS):
+        return data
+
+    if all(c in columns for c in ALPACA_COLUMNS):
+        logger.info("Alpaca-style schema detected - mapping to instruction/response")
+        drop = [c for c in columns if c not in SFT_COLUMNS]
+        return data.map(_alpaca_to_sft).remove_columns(drop)
+
+    raise ValueError(
+        f"Unsupported dataset schema with columns {columns}: expected either "
+        f"{list(SFT_COLUMNS)} or {list(ALPACA_COLUMNS)}."
+    )
 
 
 def prepare_tokenizer(tokenizer: AutoTokenizer, model_type: str, mode: str = "train") -> None:
