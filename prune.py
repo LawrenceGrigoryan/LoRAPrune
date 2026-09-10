@@ -7,7 +7,7 @@ import fire
 import torch
 import transformers
 from transformers import DataCollatorForSeq2Seq
-from datasets import load_dataset, load_from_disk
+from datasets import concatenate_datasets, load_dataset, load_from_disk
 from loraprune.trainer import LoRAPruneTrainer
 from loraprune.utils import freeze, is_gqa_model
 from loraprune.lora import LoraConfig
@@ -25,6 +25,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 ADAPTER_WEIGHTS_NAME = "adapter_model.safetensors"
 IGNORE_INDEX = -100
 SUPPORTED_MODELS = ["llama", "qwen2", "qwen3"]
+_TOOL_CALLING_DATA_PATH = "./data/Salesforce___xlam-function-calling-60k"
 
 
 def train(
@@ -75,6 +76,8 @@ def train(
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
     fp16: bool = True,  # whether to use mixed precision training
     seed: int = 42,
+    # tool calling samples
+    num_tool_calling_samples: int = 0,  # number of tool-calling samples to include in training
 ):
     params = locals()
     logger.info("Pruning with params:\n" + "\n".join(f"  {k}: {v}" for k, v in params.items()))
@@ -188,16 +191,41 @@ def train(
     # from peft import get_peft_model
     model = get_peft_model(model, config)
 
-    # c4 is too big to load into memory, so we save a smaller random sample
-    try:
-        data = load_from_disk(data_path)
-    except Exception as e:
-        logger.warning(f"Error occurred while loading dataset: {e}")
-        data = load_dataset(data_path)
+    # skipped entirely for a tool-calling-only run, which needs no `data_path`
+    data = None
+    if train_set_size > 0:
+        # c4 is too big to load into memory, so we save a smaller random sample
+        try:
+            data = load_from_disk(data_path)
+        except Exception as e:
+            logger.warning(f"Error occurred while loading dataset: {e}")
+            data = load_dataset(data_path)
+
+    # Load tool-calling samples if requested
+    tool_calling_data = None
+    if num_tool_calling_samples > 0:
+        tool_calling_data = load_dataset(_TOOL_CALLING_DATA_PATH)["train"].shuffle(seed=seed).select(range(num_tool_calling_samples))
+        logger.info(f"Loaded {len(tool_calling_data)} tool-calling samples from {_TOOL_CALLING_DATA_PATH}")
+        generate_and_tokenize_prompt_partial_tool = partial(
+            generate_and_tokenize_prompt, model_type=model_type, train_on_inputs=train_on_inputs, cutoff_len=cutoff_len, tokenizer=tokenizer, tool_calling=True
+        )
+        tool_calling_data = (
+            tool_calling_data.map(generate_and_tokenize_prompt_partial_tool)
+            .filter(lambda x: x["input_ids"] is not None)
+        )
+        # the tools JSON makes these prompts long, so a sizeable share can lose
+        # their whole response to `cutoff_len` and get filtered out above
+        dropped = num_tool_calling_samples - len(tool_calling_data)
+        if dropped:
+            logger.warning(
+                f"Dropped {dropped}/{num_tool_calling_samples} "
+                f"({dropped / num_tool_calling_samples:.1%}) tool-calling samples truncated past "
+                f"cutoff_len={cutoff_len} - raise it to keep more of them"
+            )
 
     # the SFT path reads `instruction`/`response`; train_on_inputs does plain
     # next-token prediction on `text` and needs no normalisation
-    if not train_on_inputs:
+    if not train_on_inputs and data is not None:
         data = normalize_schema(data)
 
     freeze(model)
@@ -206,7 +234,8 @@ def train(
     generate_and_tokenize_prompt_partial = partial(
         generate_and_tokenize_prompt, model_type=model_type, train_on_inputs=train_on_inputs, cutoff_len=cutoff_len, tokenizer=tokenizer
     )
-    if val_set_size > 0:
+    train_data, val_data = None, None
+    if train_set_size > 0 and val_set_size > 0:
         train_val = data["train"].train_test_split(
             train_size=train_set_size, test_size=val_set_size, shuffle=True, seed=42
         )
@@ -215,18 +244,38 @@ def train(
             .map(generate_and_tokenize_prompt_partial)
             .filter(lambda x: x["input_ids"] is not None)
         )
+        # validation stays instruction-only, so eval loss remains comparable
+        # across runs with and without tool-calling data
         val_data = (
             train_val["test"].shuffle()
             .map(generate_and_tokenize_prompt_partial)
             .filter(lambda x: x["input_ids"] is not None)
         )
-    else:
+    elif train_set_size > 0:
         train_data = (
             data["train"].shuffle().select(range(train_set_size))
             .map(generate_and_tokenize_prompt_partial)
             .filter(lambda x: x["input_ids"] is not None)
         )
-        val_data = None
+
+    if train_data is not None and tool_calling_data is not None:
+        # both sets are already tokenized, but carry different leftover columns
+        # (instruction/response vs id/query/answers/tools). Concatenating those
+        # directly would null-fill the mismatch, so keep only what training reads.
+        keep = ["input_ids", "attention_mask", "labels"]
+        n_instruction, n_tool = len(train_data), len(tool_calling_data)
+        train_data = concatenate_datasets(
+            [train_data.select_columns(keep), tool_calling_data.select_columns(keep)]
+        ).shuffle(seed=seed)  # interleave, so the two kinds aren't seen block by block
+        logger.info(
+            f"Mixed training set: {n_instruction} instruction + {n_tool} tool-calling "
+            f"= {len(train_data)} samples"
+        )
+    elif tool_calling_data is not None:
+        logger.warning("Using ONLY tool-calling samples as training data!")
+        train_data = tool_calling_data
+    elif train_data is None:
+        raise ValueError("No training data specified! Please provide a train_set_size > 0 or num_tool_calling_samples > 0.")
 
     trainer = LoRAPruneTrainer(
         model=model,
@@ -244,9 +293,11 @@ def train(
             # only consulted when optimizer != 'lorapre'; LoRAPruneTrainer.create_optimizer
             # builds LoRA-Pre itself and ignores this field.
             optim="adamw_torch",
-            eval_strategy="steps" if val_set_size > 0 else "no",
+            # keyed on the data, not on val_set_size: a tool-calling-only run has
+            # no validation set even when val_set_size is left at its default
+            eval_strategy="steps" if val_data is not None else "no",
             save_strategy="no",  # don't save with save_pretrained, results in a corrupted save
-            eval_steps=50 if val_set_size > 0 else None,
+            eval_steps=50 if val_data is not None else None,
             save_steps=50,
             output_dir=output_dir,
             load_best_model_at_end=False,

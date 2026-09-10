@@ -17,6 +17,7 @@ srun python prune.py \
     --cutoff_len 512 \
     --train_set_size 100000 \
     --val_set_size 0 \
+    --num_tool_calling_samples 0 \
     --lora_r 8 \
     --lora_alpha 16 \
     --lora_dropout 0.05 \

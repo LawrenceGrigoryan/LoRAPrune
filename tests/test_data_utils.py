@@ -1,9 +1,28 @@
-"""Tests for loraprune/data_utils.py — dataset schema normalisation."""
+"""Tests for loraprune/data_utils.py — dataset schema normalisation and tool-calling samples."""
+
+import json
 
 import pytest
-from datasets import Dataset, DatasetDict
+from datasets import Dataset, DatasetDict, concatenate_datasets
 
-from loraprune.data_utils import normalize_schema
+from loraprune.data_utils import (
+    format_tool_calls,
+    format_tools,
+    normalize_schema,
+    prepare_tool_calling_sample,
+)
+
+# xLAM stores every field as a JSON *string*, which is what makes the
+# double-encoding mistake easy to make
+TOOLS = json.dumps([
+    {"name": "get_weather", "description": "Weather by city.", "parameters": {"city": {"type": "str"}}},
+    {"name": "get_time", "description": "Local time by city.", "parameters": {"city": {"type": "str"}}},
+])
+ANSWERS = json.dumps([
+    {"name": "get_weather", "arguments": {"city": "Berlin"}},
+    {"name": "get_time", "arguments": {"city": "Berlin"}},
+])
+XLAM_ROW = {"id": 0, "query": "Weather and time in Berlin?", "answers": ANSWERS, "tools": TOOLS}
 
 
 def _alpaca(rows):
@@ -55,3 +74,54 @@ def test_unknown_schema_raises():
 
     with pytest.raises(ValueError, match="Unsupported dataset schema"):
         normalize_schema(data)
+
+
+def test_tools_are_not_double_encoded():
+    """xLAM's `tools` is already JSON; dumping it again escapes the whole list."""
+    tools_str = format_tools(TOOLS)
+
+    assert '\\"' not in tools_str  # no escaped quotes from a second encoding
+    assert not tools_str.startswith('"')  # not one quoted blob
+    lines = tools_str.splitlines()
+    assert len(lines) == 2  # one signature per line
+    assert [json.loads(line)["name"] for line in lines] == ["get_weather", "get_time"]
+
+
+def test_one_tool_call_block_per_call():
+    rendered = format_tool_calls(ANSWERS)
+
+    assert rendered.count("<tool_call>") == 2
+    assert rendered.count("</tool_call>") == 2
+    calls = [json.loads(part.split("</tool_call>")[0]) for part in rendered.split("<tool_call>")[1:]]
+    assert [c["name"] for c in calls] == ["get_weather", "get_time"]
+    assert calls[0]["arguments"] == {"city": "Berlin"}
+
+
+def test_prepare_tool_calling_sample_turns():
+    sample = prepare_tool_calling_sample(XLAM_ROW)
+
+    assert set(sample) == {"system", "user", "assistant"}
+    assert sample["user"] == XLAM_ROW["query"]
+    # signatures land in the system turn, calls in the assistant turn
+    assert "<tools>" in sample["system"] and "get_weather" in sample["system"]
+    assert sample["assistant"].startswith("<tool_call>")
+
+
+def test_mixed_sets_concatenate_on_tokenized_columns_only():
+    """
+    Instruction and tool-calling rows keep different leftover columns, so the
+    mix has to be cut down to what training reads before concatenating.
+    """
+    instruction = Dataset.from_list([
+        {"instruction": "q", "response": "a", "input_ids": [1, 2], "attention_mask": [1, 1], "labels": [1, 2]},
+    ])
+    tool = Dataset.from_list([
+        {**XLAM_ROW, "input_ids": [3, 4], "attention_mask": [1, 1], "labels": [3, 4]},
+    ])
+
+    keep = ["input_ids", "attention_mask", "labels"]
+    mixed = concatenate_datasets([instruction.select_columns(keep), tool.select_columns(keep)])
+
+    assert mixed.column_names == keep
+    assert len(mixed) == len(instruction) + len(tool)
+    assert sorted(row["input_ids"] for row in mixed) == [[1, 2], [3, 4]]
