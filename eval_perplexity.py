@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from typing import List
@@ -54,6 +55,7 @@ def main(
     lora_weights: str | None = None,
     cutoff_len: int = 128,
     granular_gqa: bool = False,
+    output_dir: str = "./evaluation/",
     seed: int = 42,
 ):
     assert (
@@ -70,6 +72,7 @@ def main(
         f"  lora_weights={lora_weights!r}\n"
         f"  cutoff_len={cutoff_len}\n"
         f"  granular_gqa={granular_gqa}\n"
+        f"  output_dir={output_dir!r}\n"
         f"  seed={seed}"
     )
     seed_everything(seed)
@@ -163,6 +166,8 @@ def main(
 
             return ppl.item()
 
+    output = {}
+
     times = []
     eval_data = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True)
     test_dataset = process_data(eval_data, tokenizer, cutoff_len, 'text')
@@ -170,6 +175,7 @@ def main(
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
     logger.info("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    output["wikitext2"] = {"ppl": results, "inference_time": float(times)}
 
     times = []
     eval_data = load_dataset('ptb_text_only', 'penn_treebank', split='validation', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True)
@@ -178,8 +184,14 @@ def main(
     results = PPLMetric(model, loader=test_loader)
     times = np.mean(times)
     logger.info("PTB PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    output["ptb"] = {"ppl": results, "inference_time": float(times)}
 
-    return
+    adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else os.path.basename(os.path.normpath(base_model))
+    save_path = os.path.join(output_dir, adapter_name, "perplexity.json")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    with open(save_path, "w") as f:
+        json.dump(output, f, indent=2)
+    logger.info(f"Results saved to {save_path}")
 
 
 if __name__ == "__main__":
