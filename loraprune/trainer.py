@@ -50,6 +50,7 @@ class LoRAPruneTrainer(Trainer):
                  prune_metric,
                  adaptive_ema: bool = False,
                  granular_gqa: bool = False,
+                 gqa_prune_signal: str = 'all',
                  optimizer_name: str = 'adamw_torch',
                  lorapre_rank: int = 8,
                  ):
@@ -59,6 +60,11 @@ class LoRAPruneTrainer(Trainer):
                          args=args,
                          data_collator=data_collator
                          )
+        if gqa_prune_signal not in utils.GQA_PRUNE_SIGNALS:
+            raise ValueError(
+                f"`{gqa_prune_signal}` is not a supported gqa_prune_signal! "
+                f"Choose one of {sorted(utils.GQA_PRUNE_SIGNALS)}."
+            )
         self.ratio = ratio
         self.init_ratio = init_ratio
         self.warmup_iters = warmup_iters
@@ -67,6 +73,7 @@ class LoRAPruneTrainer(Trainer):
         self.prune_metric = prune_metric
         self.adaptive_ema = adaptive_ema
         self.granular_gqa = granular_gqa
+        self.gqa_prune_signal = gqa_prune_signal
         self.optimizer_name = optimizer_name
         self.lorapre_rank = lorapre_rank
 
@@ -390,7 +397,9 @@ class LoRAPruneTrainer(Trainer):
 
         sensitivity_dict = utils.init_sensitivity_dict(model, granular_gqa=self.granular_gqa)
         if self.adaptive_ema:
-            var_dict, alpha_dict, count_dict = utils.init_adaptive_ema_state(model, granular_gqa=self.granular_gqa)
+            var_dict, alpha_dict, count_dict = utils.init_adaptive_ema_state(
+                model, granular_gqa=self.granular_gqa, gqa_prune_signal=self.gqa_prune_signal,
+            )
         else:
             var_dict = alpha_dict = count_dict = None
         for epoch in range(epochs_trained, num_train_epochs):
@@ -493,6 +502,7 @@ class LoRAPruneTrainer(Trainer):
                             alpha_dict=alpha_dict,
                             count_dict=count_dict,
                             granular_gqa=self.granular_gqa,
+                            gqa_prune_signal=self.gqa_prune_signal,
                         )
                     ratio = utils.schedule_sparsity_ratio(self.state.global_step, self.state.max_steps,
                                                           self.warmup_iters,

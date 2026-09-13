@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from loraprune.lora import Linear
 from loraprune.utils import (
+    GQA_PRUNE_SIGNALS,
     _is_target_layer,
     compute_sensitivity,
     freeze,
@@ -1123,3 +1124,140 @@ class TestPruneOneLayerGranularGQA:
         # 1 KV head × 4 Q-per-KV = 4 Q heads → 16 rows
         assert self.layer.self_attn.q_proj.weight.shape == (16, self.hidden)
         assert self.layer.self_attn.k_proj.weight.shape == (self.head_dim, self.hidden)
+
+
+# ---------------------------------------------------------------------------
+# gqa_prune_signal — sanity on the constant itself
+# ---------------------------------------------------------------------------
+
+class TestGqaPruneSignals:
+    def test_all_signal_includes_every_projection(self):
+        assert GQA_PRUNE_SIGNALS["all"] == {"q_proj", "k_proj", "v_proj", "o_proj"}
+
+    def test_query_and_keyvalue_partition_all(self):
+        assert GQA_PRUNE_SIGNALS["query"] | GQA_PRUNE_SIGNALS["keyvalue"] == GQA_PRUNE_SIGNALS["all"]
+        assert GQA_PRUNE_SIGNALS["query"].isdisjoint(GQA_PRUNE_SIGNALS["keyvalue"])
+
+
+# ---------------------------------------------------------------------------
+# gqa_prune_signal — init_adaptive_ema_state (non-granular GQA only)
+# ---------------------------------------------------------------------------
+
+class TestInitAdaptiveEmaStateGqaPruneSignal:
+    def test_default_matches_all_signal_four_projections(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        _, _, count_default = init_adaptive_ema_state(model)
+        _, _, count_all = init_adaptive_ema_state(model, gqa_prune_signal="all")
+        attn_key = next(k for k in count_default if 'self_attn' in k)
+        assert count_default[attn_key] == count_all[attn_key] == 4
+
+    def test_query_signal_counts_two_projections(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        _, _, count_dict = init_adaptive_ema_state(model, gqa_prune_signal="query")
+        attn_key = next(k for k in count_dict if 'self_attn' in k)
+        assert count_dict[attn_key] == 2
+
+    def test_keyvalue_signal_counts_two_projections(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        _, _, count_dict = init_adaptive_ema_state(model, gqa_prune_signal="keyvalue")
+        attn_key = next(k for k in count_dict if 'self_attn' in k)
+        assert count_dict[attn_key] == 2
+
+    def test_mlp_count_unaffected_by_signal(self):
+        # mlp group_name covers gate_proj/up_proj/down_proj (3 projections); the new
+        # gqa_prune_signal skip only ever applies to self_attn weight names, so this
+        # count must be identical regardless of the signal chosen.
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2, inter=64)
+        _, _, count_query = init_adaptive_ema_state(model, gqa_prune_signal="query")
+        _, _, count_all = init_adaptive_ema_state(model, gqa_prune_signal="all")
+        mlp_key = next(k for k in count_query if 'mlp' in k)
+        assert count_query[mlp_key] == count_all[mlp_key] == 3
+
+    def test_mha_unaffected_by_signal(self):
+        model = _build_mha(num_layers=1, num_heads=4)
+        _, _, count_query = init_adaptive_ema_state(model, gqa_prune_signal="query")
+        _, _, count_all = init_adaptive_ema_state(model, gqa_prune_signal="all")
+        attn_key = next(k for k in count_all if 'self_attn' in k)
+        assert count_query[attn_key] == count_all[attn_key] == 4
+
+    def test_granular_gqa_ignores_signal(self):
+        model = _build_gqa(num_layers=1, num_heads=8, num_kv=2)
+        _, _, count_query = init_adaptive_ema_state(model, granular_gqa=True, gqa_prune_signal="query")
+        _, _, count_keyvalue = init_adaptive_ema_state(model, granular_gqa=True, gqa_prune_signal="keyvalue")
+        attn_key = next(k for k in count_query if 'self_attn' in k)
+        # granular mode always scores q_proj + o_proj only, regardless of gqa_prune_signal
+        assert count_query[attn_key] == count_keyvalue[attn_key] == 2
+
+
+# ---------------------------------------------------------------------------
+# gqa_prune_signal — update_sensitivity_dict (non-granular GQA only)
+# ---------------------------------------------------------------------------
+
+class TestUpdateSensitivityDictGqaPruneSignal:
+    def setup_method(self):
+        self.model = _build_gqa(num_layers=1, num_heads=8, num_kv=2, hidden=32)
+        self.layer0 = self.model.base_model.model.model.layers[0]
+        _set_lora_grads(self.model)
+
+    def _manual_sum(self, weight_names):
+        total = None
+        for wn in weight_names:
+            module = getattr(self.layer0.self_attn, wn)
+            s = compute_sensitivity(self.model, module, is_attn=True, prune_metric='magnitude',
+                                    transpose=(wn == 'o_proj'), granular_gqa=False)
+            total = s if total is None else total + s
+        return total
+
+    def test_query_signal_sums_q_and_o_only(self):
+        s_dict = init_sensitivity_dict(self.model)
+        update_sensitivity_dict(self.model, s_dict, pruning_type='magnitude', gqa_prune_signal='query')
+        attn_key = next(k for k in s_dict if 'self_attn' in k)
+        expected = self._manual_sum(['q_proj', 'o_proj']) * 0.1
+        assert torch.allclose(s_dict[attn_key], expected)
+
+    def test_keyvalue_signal_sums_k_and_v_only(self):
+        s_dict = init_sensitivity_dict(self.model)
+        update_sensitivity_dict(self.model, s_dict, pruning_type='magnitude', gqa_prune_signal='keyvalue')
+        attn_key = next(k for k in s_dict if 'self_attn' in k)
+        expected = self._manual_sum(['k_proj', 'v_proj']) * 0.1
+        assert torch.allclose(s_dict[attn_key], expected)
+
+    def test_all_signal_matches_default_and_sums_everything(self):
+        s_dict_default = init_sensitivity_dict(self.model)
+        update_sensitivity_dict(self.model, s_dict_default, pruning_type='magnitude')
+        s_dict_explicit = init_sensitivity_dict(self.model)
+        update_sensitivity_dict(self.model, s_dict_explicit, pruning_type='magnitude', gqa_prune_signal='all')
+        attn_key = next(k for k in s_dict_default if 'self_attn' in k)
+        expected = self._manual_sum(['q_proj', 'k_proj', 'v_proj', 'o_proj']) * 0.1
+        assert torch.allclose(s_dict_default[attn_key], expected)
+        assert torch.allclose(s_dict_explicit[attn_key], expected)
+
+    def test_mlp_unaffected_by_signal(self):
+        s_dict = init_sensitivity_dict(self.model)
+        update_sensitivity_dict(self.model, s_dict, pruning_type='magnitude', gqa_prune_signal='keyvalue')
+        mlp_key = next(k for k in s_dict if 'mlp' in k)
+        assert s_dict[mlp_key].sum().item() > 0.0
+
+    def test_mha_unaffected_by_signal(self):
+        model = _build_mha(num_layers=1, num_heads=4)
+        _set_lora_grads(model)
+        s_query = init_sensitivity_dict(model)
+        update_sensitivity_dict(model, s_query, pruning_type='magnitude', gqa_prune_signal='query')
+        s_all = init_sensitivity_dict(model)
+        update_sensitivity_dict(model, s_all, pruning_type='magnitude', gqa_prune_signal='all')
+        attn_key = next(k for k in s_all if 'self_attn' in k)
+        assert torch.allclose(s_query[attn_key], s_all[attn_key])
+
+    def test_granular_gqa_ignores_signal(self):
+        s_query = init_sensitivity_dict(self.model, granular_gqa=True)
+        update_sensitivity_dict(self.model, s_query, pruning_type='magnitude',
+                                granular_gqa=True, gqa_prune_signal='keyvalue')
+        s_default = init_sensitivity_dict(self.model, granular_gqa=True)
+        update_sensitivity_dict(self.model, s_default, pruning_type='magnitude', granular_gqa=True)
+        attn_key = next(k for k in s_default if 'self_attn' in k)
+        assert torch.allclose(s_query[attn_key], s_default[attn_key])
+
+    def test_invalid_signal_raises(self):
+        s_dict = init_sensitivity_dict(self.model)
+        with pytest.raises(KeyError):
+            update_sensitivity_dict(self.model, s_dict, pruning_type='magnitude', gqa_prune_signal='bogus')

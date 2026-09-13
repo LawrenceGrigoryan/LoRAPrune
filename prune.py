@@ -54,6 +54,7 @@ def train(
     prune_metric: str = 'lora',  # options: lora|grad|magnitude
     adaptive_ema: bool = False,  # use per-group variance-adaptive EMA instead of fixed 0.9/0.1
     granular_gqa: bool = False,  # prune Q heads independently; remove KV head only when all Q heads in its group are gone
+    gqa_prune_signal: str = 'all',  # non-granular GQA only: which projections' sensitivity decide whole-KV-group pruning: query|keyvalue|all
     # lora hyperparams
     lora_r: int = 8,
     lora_alpha: int = 16,
@@ -86,6 +87,13 @@ def train(
     if optimizer not in supported_optimizers:
         raise ValueError(
             f"`{optimizer}` optimizer is not supported! Choose one of {supported_optimizers}."
+        )
+
+    supported_gqa_prune_signals = ('all', 'query', 'keyvalue')
+    if gqa_prune_signal not in supported_gqa_prune_signals:
+        raise ValueError(
+            f"`{gqa_prune_signal}` gqa_prune_signal is not supported! "
+            f"Choose one of {supported_gqa_prune_signals}."
         )
 
     if optimizer == 'lorapre':
@@ -319,6 +327,7 @@ def train(
         prune_metric=prune_metric,
         adaptive_ema=adaptive_ema,
         granular_gqa=granular_gqa,
+        gqa_prune_signal=gqa_prune_signal,
         optimizer_name=optimizer,
         lorapre_rank=lorapre_rank,
     )

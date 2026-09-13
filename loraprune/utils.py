@@ -11,6 +11,17 @@ pruning_groups = {'self_attn': ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
                   'mlp': ['up_proj', 'gate_proj'],
                   'block': ['o_proj', 'down_proj']}
 
+# Which projections feed the whole-KV-group importance score used by (non-granular)
+# GQA pruning. "query"/"o_proj" and "keyvalue"/"k_proj"+"v_proj" are the two natural
+# halves of a GQA attention block; "all" (default) matches the original behaviour of
+# summing every projection's sensitivity into one score per KV group. Does not affect
+# granular_gqa=True, which always uses its own fixed q_proj+o_proj-only scoring.
+GQA_PRUNE_SIGNALS = {
+    "all": {"q_proj", "k_proj", "v_proj", "o_proj"},
+    "query": {"q_proj", "o_proj"},
+    "keyvalue": {"k_proj", "v_proj"},
+}
+
 
 def is_gqa_model(model) -> bool:
     is_gqa_model = (model.config.num_attention_heads > model.config.num_key_value_heads)
@@ -126,7 +137,7 @@ def init_sensitivity_dict(model, granular_gqa=False):
     return sensitivity_record
 
 
-def init_adaptive_ema_state(model, granular_gqa=False):
+def init_adaptive_ema_state(model, granular_gqa=False, gqa_prune_signal="all"):
     """
     Allocate auxiliary state for adaptive per-group EMA (used when ``adaptive_ema=True``).
 
@@ -136,15 +147,21 @@ def init_adaptive_ema_state(model, granular_gqa=False):
                        shape and device as the corresponding ``s_dict`` entry).
     * ``alpha_dict`` – float scalars per group, initialised to ``_ADAPTIVE_ALPHA_MAX``.
     * ``count_dict`` – number of projections that feed into each group accumulator
-                       (4 for full attention blocks, 2 for MLP blocks).  Used to
-                       normalise the summed ``s_all`` values so that attention and MLP
-                       groups are on the same absolute scale before blending.
+                       (4 for full attention blocks, 2 for MLP blocks, fewer for
+                       non-granular GQA when ``gqa_prune_signal`` excludes some
+                       projections).  Used to normalise the summed ``s_all`` values so
+                       that attention and MLP groups are on the same absolute scale
+                       before blending.
 
     Parameters
     ----------
     granular_gqa : bool, optional
         Must match the value passed to ``init_sensitivity_dict`` so that tensor
         shapes are consistent.
+    gqa_prune_signal : {"all", "query", "keyvalue"}, optional
+        For non-granular GQA models, restricts which projections feed the
+        whole-KV-group importance score. Ignored when ``granular_gqa=True`` (see
+        ``GQA_PRUNE_SIGNALS``).
     """
     var_dict = {}
     alpha_dict = {}
@@ -165,6 +182,11 @@ def init_adaptive_ema_state(model, granular_gqa=False):
             # k/v don't contribute to sensitivity in granular GQA — exclude from count
             if granular_gqa and is_gqa_model(model) and weight_name in ["k_proj", "v_proj"]:
                 continue
+            # non-granular GQA: gqa_prune_signal restricts which projections feed the
+            # whole-KV-group importance score (query-side, kv-side, or all four)
+            if (not granular_gqa) and is_gqa_model(model) and weight_name in pruning_groups['self_attn'] \
+                    and weight_name not in GQA_PRUNE_SIGNALS[gqa_prune_signal]:
+                continue
             if group_name in var_dict:
                 count_dict[group_name] += 1
                 continue
@@ -183,6 +205,7 @@ def update_sensitivity_dict(
         alpha_dict: dict | None = None,
         count_dict: dict | None = None,
         granular_gqa: bool = False,
+        gqa_prune_signal: str = "all",
     ) -> dict[str, torch.Tensor]:
     """
     Compute per-group sensitivity for the current step and fold it into the
@@ -229,6 +252,12 @@ def update_sensitivity_dict(
         Current per-group EMA coefficient; mutated in-place for logging.
     count_dict : dict[str, int] | None
         Number of projections per group used for cross-group normalization.
+    gqa_prune_signal : {"all", "query", "keyvalue"}, optional
+        For non-granular GQA models, restricts which projections feed the
+        whole-KV-group importance score used later by ``local_prune``: the query
+        side (``q_proj``+``o_proj``), the kv side (``k_proj``+``v_proj``), or all
+        four projections summed together (default, matches the original behaviour).
+        Ignored when ``granular_gqa=True``.
 
     Returns
     -------
@@ -245,6 +274,12 @@ def update_sensitivity_dict(
             # In granular GQA mode, k/v scores are identical within a KV group and
             # don't help discriminate between Q heads — only q_proj and o_proj score.
             if granular_gqa and is_gqa_model(model) and weight_name in ["k_proj", "v_proj"]:
+                continue
+
+            # non-granular GQA: gqa_prune_signal restricts which projections feed the
+            # whole-KV-group importance score (query-side, kv-side, or all four)
+            if (not granular_gqa) and is_gqa_model(model) and is_attn \
+                    and weight_name not in GQA_PRUNE_SIGNALS[gqa_prune_signal]:
                 continue
 
             s = compute_sensitivity(model, module, is_attn, pruning_type, fan_in, granular_gqa=granular_gqa)
