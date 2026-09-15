@@ -7,7 +7,7 @@ import fire
 import torch
 import numpy as np
 from peft.utils.save_and_load import load_peft_weights
-from datasets import load_dataset
+from datasets import Dataset as HFDataset, load_dataset
 from loguru import logger
 from torch.utils.data.dataset import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -168,6 +168,7 @@ def main(
 
     output = {}
 
+    # WIKITEXT
     times = []
     eval_data = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True)
     test_dataset = process_data(eval_data, tokenizer, cutoff_len, 'text')
@@ -177,6 +178,26 @@ def main(
     logger.info("wikitext2 PPL: {:.2f}  inference time: {:2f}".format(results, times))
     output["wikitext2"] = {"ppl": results, "inference_time": float(times)}
 
+    # FINEWEB
+    times = []
+    eval_data = load_dataset('HuggingFaceFW/fineweb', 'default', split='train', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True, streaming=True)
+    eval_data = eval_data.shuffle(buffer_size=10_000, seed=seed)
+
+    samples = []
+    for i, example in enumerate(eval_data):
+        samples.append(example)
+        if i + 1 >= 1000:
+            break
+
+    fineweb_eval_data = HFDataset.from_list(samples)
+    test_dataset = process_data(fineweb_eval_data, tokenizer, cutoff_len, 'text')
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
+    results = PPLMetric(model, loader=test_loader)
+    times = np.mean(times)
+    logger.info("FineWeb PPL: {:.2f}  inference time: {:2f}".format(results, times))
+    output["fineweb"] = {"ppl": results, "inference_time": float(times)}
+
+    # PENN TREEBANK
     times = []
     eval_data = load_dataset('ptb_text_only', 'penn_treebank', split='validation', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True)
     test_dataset = process_data(eval_data, tokenizer, cutoff_len, 'sentence')
