@@ -180,16 +180,21 @@ def main(
 
     # FINEWEB
     times = []
-    eval_data = load_dataset('HuggingFaceFW/fineweb', 'default', split='train', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True, streaming=True)
-    eval_data = eval_data.shuffle(buffer_size=10_000, seed=seed)
+    fineweb_cache_dir = os.path.join(os.getenv("HF_DATASETS_CACHE", "./data/benchmarks"), "fineweb_sample")
+    if os.path.isdir(fineweb_cache_dir):
+        logger.info(f"Loading cached FineWeb sample from {fineweb_cache_dir}")
+        fineweb_eval_data = HFDataset.load_from_disk(fineweb_cache_dir)
+    else:
+        eval_data = load_dataset('HuggingFaceFW/fineweb', 'default', split='train', cache_dir=os.getenv("HF_DATASETS_CACHE"), trust_remote_code=True, streaming=True)
+        eval_data = eval_data.shuffle(buffer_size=10_000, seed=seed)
 
-    samples = []
-    for i, example in enumerate(eval_data):
-        samples.append(example)
-        if i + 1 >= 1000:
-            break
+        samples = []
+        for i, example in enumerate(eval_data):
+            samples.append(example)
+            if i + 1 >= 1000:
+                break
 
-    fineweb_eval_data = HFDataset.from_list(samples)
+        fineweb_eval_data = HFDataset.from_list(samples)
     test_dataset = process_data(fineweb_eval_data, tokenizer, cutoff_len, 'text')
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
     results = PPLMetric(model, loader=test_loader)
