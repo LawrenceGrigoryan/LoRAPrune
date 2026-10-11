@@ -288,6 +288,21 @@ class LoRAPruneTrainer(Trainer):
 
         # Activate gradient checkpointing if needed
         if args.gradient_checkpointing:
+            # The base model is frozen (only LoRA adapters are trainable), so
+            # without this, the tensor at each checkpoint segment's input
+            # boundary has requires_grad=False and autograd never builds a
+            # graph through that segment at all -- LoRA params inside it would
+            # get no gradient, silently. Same hasattr/hook fallback peft's own
+            # prepare_model_for_kbit_training uses (see peft.utils.other), but
+            # that helper only triggers for quantized loads, never here since
+            # this codebase always loads in fp16.
+            if hasattr(self.model, "enable_input_require_grads"):
+                self.model.enable_input_require_grads()
+            else:
+                def _make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
+
+                self.model.get_input_embeddings().register_forward_hook(_make_inputs_require_grad)
             self.model.gradient_checkpointing_enable()
 
         model = self._wrap_model(self.model_wrapped)

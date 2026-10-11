@@ -16,7 +16,7 @@ from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
 from loraprune.data_utils import prepare_tokenizer
-from evaluation.utils import seed_everything
+from evaluation.utils import count_parameters, param_summary, seed_everything
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -88,7 +88,8 @@ def main(
     prepare_tokenizer(tokenizer, model.config.model_type, mode="inference")
 
     logger.info(f"Model dtype: {model.dtype}")
-    total_params = sum(p.numel() for p in model.parameters())
+    total_params = count_parameters(model)
+    total_params_pruned = total_params
     logger.info(f"Total model parameters: {total_params}")
     if lora_weights:
         config = LoraConfig(
@@ -116,7 +117,7 @@ def main(
         freeze(model)
         prune_from_checkpoint(model, granular_gqa=granular_gqa)
         
-        total_params_pruned = sum(p.numel() for p in model.parameters())
+        total_params_pruned = count_parameters(model)
         logger.info(f"Total model parameters after pruning: {total_params_pruned}")
         logger.info(f"Parameters left after pruning: {round((total_params_pruned / total_params)*100, 2)}%")
     else:
@@ -166,7 +167,7 @@ def main(
 
             return ppl.item()
 
-    output = {}
+    output = {"params": param_summary(total_params, total_params_pruned)}
 
     # WIKITEXT
     times = []

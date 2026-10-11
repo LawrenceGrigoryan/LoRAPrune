@@ -295,6 +295,7 @@ class LoraModel(torch.nn.Module):
         self.peft_config = config
         self.model = model
         self._find_and_replace()
+        self._wire_attention_head_masks()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
         self.forward = self.model.forward
 
@@ -344,6 +345,24 @@ class LoraModel(torch.nn.Module):
                 f"Target modules {self.peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
+
+    def _wire_attention_head_masks(self):
+        """Gate each attention block's o_proj input with its sibling q_proj's
+        per-head output mask, so a pruned query head's contribution to o_proj
+        is exactly zero throughout training (see `Linear.forward`)."""
+        for module in self.model.modules():
+            q = getattr(module, "q_proj", None)
+            o = getattr(module, "o_proj", None)
+            if not (isinstance(o, Linear) and isinstance(q, Linear)):
+                if isinstance(o, Linear) and not isinstance(q, Linear):
+                    warnings.warn(
+                        "o_proj is a LoRA target but q_proj is not — granular GQA "
+                        "pruning cannot mask attention heads correctly without a "
+                        "q_proj.lora_mask to read. Add q_proj to lora_target_modules."
+                    )
+                continue
+            if o.in_features == q.out_features:
+                object.__setattr__(o, "head_input_mask_source", q)
 
     def _get_submodules(self, key):
         parent = self.model.get_submodule(".".join(key.split(".")[:-1]))
@@ -506,6 +525,13 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_B.eval()
 
     def forward(self, x: torch.Tensor):
+        head_mask_source = self.__dict__.get("head_input_mask_source", None)
+        if head_mask_source is not None and hasattr(head_mask_source, "lora_mask"):
+            # Gate this layer's INPUT with a sibling layer's output mask (e.g. o_proj
+            # gated by q_proj's per-head mask). This makes a pruned attention head's
+            # contribution exactly zero throughout training, matching what hard
+            # pruning later deletes — see loraprune/lora.py's `_wire_attention_head_masks`.
+            x = x * head_mask_source.lora_mask.reshape(1, 1, -1).to(device=x.device, dtype=x.dtype)
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 self.weight.data -= (

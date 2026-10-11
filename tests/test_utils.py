@@ -1261,3 +1261,110 @@ class TestUpdateSensitivityDictGqaPruneSignal:
         s_dict = init_sensitivity_dict(self.model)
         with pytest.raises(KeyError):
             update_sensitivity_dict(self.model, s_dict, pruning_type='magnitude', gqa_prune_signal='bogus')
+
+
+# ---------------------------------------------------------------------------
+# Granular GQA — o_proj input masking (training/export consistency)
+#
+# Regression coverage for the "mean(V) leakage" bug: masking q_proj's OUTPUT
+# alone does not zero a pruned head's contribution to attention (softmax of an
+# all-zero score row is uniform, not zero), so o_proj trains against a bogus
+# mean(V) signal that hard-pruning later deletes without ever having been zero.
+# LoraModel._wire_attention_head_masks gates o_proj's INPUT with q_proj's mask
+# so the two stay consistent. This test goes through the real get_peft_model →
+# LoraModel path (not the bare _lora()/_Attn fakes above), since the fix lives
+# entirely in wiring that only LoraModel performs.
+# ---------------------------------------------------------------------------
+
+class TestGranularGqaOProjInputMasking:
+    def _build_model(self):
+        from transformers import LlamaConfig, LlamaForCausalLM
+
+        config = LlamaConfig(
+            vocab_size=32,
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=1,
+            num_attention_heads=8,
+            num_key_value_heads=2,
+            max_position_embeddings=16,
+            attn_implementation="eager",
+        )
+        torch.manual_seed(0)
+        model = LlamaForCausalLM(config)
+        model.eval()
+        return model
+
+    def _wrap_lora(self, model):
+        from loraprune.lora import LoraConfig
+        from loraprune.peft_model import get_peft_model
+
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=8,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                             "gate_proj", "up_proj", "down_proj"],
+            lora_dropout=0.0,
+            bias="none",
+            task_type="CAUSAL_LM",
+            peft_type="LORA",
+        )
+        return get_peft_model(model, lora_config)
+
+    def test_wiring_sets_head_input_mask_source(self):
+        model = self._wrap_lora(self._build_model())
+        attn = model.base_model.model.model.layers[0].self_attn
+        assert attn.o_proj.__dict__.get("head_input_mask_source") is attn.q_proj
+
+    def test_masked_forward_matches_hard_pruned_forward(self):
+        """
+        Granular-prune one Q head out of each KV group (head 0 in group 0, head 4
+        in group 1) while leaving k_proj/v_proj fully alive — exactly the case
+        where the mean(V) leakage bug was real. Pruning the same count per group
+        matches what local_prune actually produces (repeat_kv's scalar n_rep can't
+        express an imbalanced Q-per-KV split, so local_prune never creates one).
+        The model's output must be unchanged by later hard-pruning o_proj's columns,
+        since training should already have seen those heads contribute exactly zero.
+        """
+        model = self._wrap_lora(self._build_model())
+        layer = model.base_model.model.model.layers[0]
+        head_dim = 4  # hidden_size=32 / num_attention_heads=8
+
+        q_mask = torch.tensor([0., 1., 1., 1., 0., 1., 1., 1.]).repeat_interleave(head_dim)
+        layer.self_attn.q_proj.lora_mask.data = q_mask.clone()
+        layer.self_attn.o_proj.lora_mask.data = torch.ones_like(q_mask)
+        # k_proj/v_proj left at all-ones: both KV groups stay alive because 3 of
+        # their 4 Q heads survive — matching local_prune's Pass 2 derivation.
+        for proj in (layer.mlp.gate_proj, layer.mlp.up_proj, layer.mlp.down_proj):
+            proj.lora_mask.data = torch.ones_like(proj.lora_mask.data)
+
+        input_ids = torch.randint(0, 32, (1, 6), generator=torch.Generator().manual_seed(1))
+        with torch.no_grad():
+            logits_before = model(input_ids=input_ids).logits.clone()
+
+        prune_one_layer(model, layer, granular_gqa=True)
+
+        with torch.no_grad():
+            logits_after = model(input_ids=input_ids).logits
+
+        assert torch.allclose(logits_before, logits_after, atol=1e-4), (
+            "Hard-pruning o_proj's columns changed the model's output — training "
+            "did not actually see the pruned heads contribute zero."
+        )
+
+    def test_non_granular_wiring_is_inert(self):
+        """The o_proj input gate must be a no-op when nothing is pruned."""
+        model = self._wrap_lora(self._build_model())
+        layer = model.base_model.model.model.layers[0]
+        input_ids = torch.randint(0, 32, (1, 6), generator=torch.Generator().manual_seed(2))
+
+        with torch.no_grad():
+            logits_wired = model(input_ids=input_ids).logits.clone()
+
+        # Bypass the wiring entirely to get a reference "no fix" forward pass.
+        attn = layer.self_attn
+        object.__delattr__(attn.o_proj, "head_input_mask_source")
+        with torch.no_grad():
+            logits_unwired = model(input_ids=input_ids).logits
+
+        assert torch.allclose(logits_wired, logits_unwired, atol=1e-6)

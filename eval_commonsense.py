@@ -12,7 +12,7 @@ from lm_eval.models.huggingface import HFLM
 from loraprune.peft_model import get_peft_model
 from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
-from evaluation.utils import seed_everything
+from evaluation.utils import InferenceTimer, count_parameters, param_summary, seed_everything
 
 if torch.cuda.is_available():
     device = "cuda"
@@ -64,7 +64,8 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
     tokenizer.padding_side = "left"  # required for batched causal LM eval
     model.resize_token_embeddings(len(tokenizer))  # Qwen adds <|pad|> token
 
-    total_params = sum(p.numel() for p in model.parameters())
+    total_params = count_parameters(model)
+    total_params_pruned = total_params
     logger.info(f"Total parameters before pruning: {total_params}")
     
     if adapter_id:
@@ -88,41 +89,44 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
         freeze(model)
         prune_from_checkpoint(model, granular_gqa=granular_gqa)
 
-        total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Total parameters after pruning: {total_params}")
+        total_params_pruned = count_parameters(model)
+        logger.info(f"Total parameters after pruning: {total_params_pruned}")
     else:
         logger.warning("No adapter provided, evaluating the base model")
     
     lm_eval_model = HFLM(pretrained=model, tokenizer=tokenizer, device=device)
 
     logger.info(f"Evaluation on MMLU, 5-shot...")
-    mmlu_res = lm_eval.simple_evaluate(
-        model=lm_eval_model,
-        tasks=["mmlu"],
-        num_fewshot=5,
-        batch_size=batch_size,
-        limit=limit,
-    )
+    with InferenceTimer(model) as mmlu_timer:
+        mmlu_res = lm_eval.simple_evaluate(
+            model=lm_eval_model,
+            tasks=["mmlu"],
+            num_fewshot=5,
+            batch_size=batch_size,
+            limit=limit,
+        )
     logger.info(f"Evaluation on HellaSwag, 0-shot...")
-    hellaswag_res = lm_eval.simple_evaluate(
-        model=lm_eval_model,
-        tasks=["hellaswag"],
-        num_fewshot=0,
-        batch_size=batch_size,
-        limit=limit,
-    )
+    with InferenceTimer(model) as hellaswag_timer:
+        hellaswag_res = lm_eval.simple_evaluate(
+            model=lm_eval_model,
+            tasks=["hellaswag"],
+            num_fewshot=0,
+            batch_size=batch_size,
+            limit=limit,
+        )
     logger.info(f"Evaluation on WinoGrande, 0-shot...")
-    wino_res = lm_eval.simple_evaluate(
-        model=lm_eval_model,
-        tasks=["winogrande"],
-        num_fewshot=0,
-        batch_size=batch_size,
-        limit=limit,
-    )
+    with InferenceTimer(model) as wino_timer:
+        wino_res = lm_eval.simple_evaluate(
+            model=lm_eval_model,
+            tasks=["winogrande"],
+            num_fewshot=0,
+            batch_size=batch_size,
+            limit=limit,
+        )
 
-    named_results = [("mmlu", mmlu_res, "acc,none"), ("hellaswag", hellaswag_res, "acc_norm,none"), ("winogrande", wino_res, "acc,none")]
-    output = {}
-    for name, result, metric_key in named_results:
+    named_results = [("mmlu", mmlu_res, "acc,none", mmlu_timer), ("hellaswag", hellaswag_res, "acc_norm,none", hellaswag_timer), ("winogrande", wino_res, "acc,none", wino_timer)]
+    output = {"params": param_summary(total_params, total_params_pruned)}
+    for name, result, metric_key, timer in named_results:
         task_accs = {}
         for task, metrics in result["results"].items():
             acc = metrics[metric_key]
@@ -130,7 +134,8 @@ def eval_commonsense(model_id: str, adapter_id: str = None, batch_size: int = 8,
             logger.info(f"{task}: {acc:.4f}")
         avg = float(np.mean(list(task_accs.values())))
         logger.info(f"{name} avg: {avg:.4f}")
-        output[name] = {**task_accs, "avg": avg}
+        output[name] = {**task_accs, "avg": avg, "timing": timer.summary()}
+        logger.info(f"{name} timing: {output[name]['timing']}")
 
     adapter_name = os.path.basename(os.path.normpath(adapter_id)) if adapter_id else os.path.basename(os.path.normpath(model_id))
     save_path = os.path.join(output_dir, adapter_name, "commonsense.json")

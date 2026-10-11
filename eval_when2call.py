@@ -16,7 +16,7 @@ from loraprune.utils import freeze, prune_from_checkpoint
 from loraprune.lora import LoraConfig
 from loraprune.data_utils import prepare_tokenizer
 from evaluation.When2Call.evaluation.mcq.lm_eval_harness.when2call.utils import process_docs_qwen2_5, process_docs_llama3_2
-from evaluation.utils import compute_loglikelihood, seed_everything
+from evaluation.utils import InferenceTimer, compute_loglikelihood, count_parameters, param_summary, seed_everything
 
 load_dotenv()
 
@@ -87,7 +87,8 @@ def main(base_model: str = "",
     )
     tokenizer = AutoTokenizer.from_pretrained(base_model, legacy=False)
 
-    total_params = sum(p.numel() for p in model.parameters())
+    total_params = count_parameters(model)
+    total_params_pruned = total_params
     logger.info(f"Total model parameters: {total_params}")
     model_type = model.config.model_type
     if lora_weights:
@@ -118,7 +119,7 @@ def main(base_model: str = "",
         freeze(model)
         prune_from_checkpoint(model, granular_gqa=granular_gqa)
         
-        total_params_pruned = sum(p.numel() for p in model.parameters())
+        total_params_pruned = count_parameters(model)
         logger.info(f"Total model parameters after pruning: {total_params_pruned}")
         logger.info(f"Parameters left after pruning: {round((total_params_pruned / total_params)*100, 2)}%")
     else:
@@ -140,24 +141,27 @@ def main(base_model: str = "",
 
     # FIXME: batched
     result = []
-    for i in tqdm(range(len(dataset_prep))):
-        sample = dataset_prep[i]
-        choices = sample["choices"]
-        target_index = sample["target_index"]
-        answer_types = list(sample["answers"].keys())
-        lls = []
-        lls_norm = []
-        for choice in choices:
-            ll, n_cont = compute_loglikelihood(sample["prompt"], choice, model, tokenizer)
-            lls.append(ll)
-            lls_norm.append(ll / n_cont)
-        pred_idx = max(range(len(choices)), key=lambda idx: lls[idx])
-        pred_idx_norm = max(range(len(choices)), key=lambda idx: lls_norm[idx])
-        result.append({
-            "gold": answer_types[target_index],
-            "predicted": answer_types[pred_idx],
-            "predicted_norm": answer_types[pred_idx_norm],
-        })
+    with InferenceTimer(model) as timer:
+        for i in tqdm(range(len(dataset_prep))):
+            sample = dataset_prep[i]
+            choices = sample["choices"]
+            target_index = sample["target_index"]
+            answer_types = list(sample["answers"].keys())
+            lls = []
+            lls_norm = []
+            for choice in choices:
+                ll, n_cont = compute_loglikelihood(sample["prompt"], choice, model, tokenizer)
+                lls.append(ll)
+                lls_norm.append(ll / n_cont)
+            pred_idx = max(range(len(choices)), key=lambda idx: lls[idx])
+            pred_idx_norm = max(range(len(choices)), key=lambda idx: lls_norm[idx])
+            result.append({
+                "gold": answer_types[target_index],
+                "predicted": answer_types[pred_idx],
+                "predicted_norm": answer_types[pred_idx_norm],
+            })
+    timing = timer.summary()
+    logger.info(f"timing: {timing}")
 
     adapter_name = os.path.basename(os.path.normpath(lora_weights)) if lora_weights else os.path.basename(os.path.normpath(base_model))
     save_path = os.path.join(output_dir, adapter_name, "when2call.json")
@@ -177,7 +181,7 @@ def main(base_model: str = "",
 
     metrics_path = os.path.join(output_dir, adapter_name, "when2call_mcq.json")
     with open(metrics_path, "w") as f:
-        json.dump({"acc": acc, "acc_norm": acc_norm, "macro_f1": macro_f1, "macro_f1_norm": macro_f1_norm}, f, indent=2)
+        json.dump({"acc": acc, "acc_norm": acc_norm, "macro_f1": macro_f1, "macro_f1_norm": macro_f1_norm, "timing": timing, "params": param_summary(total_params, total_params_pruned)}, f, indent=2)
     logger.info(f"Results saved to {metrics_path}")
     
 

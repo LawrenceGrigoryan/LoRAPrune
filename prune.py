@@ -42,6 +42,7 @@ def train(
     cutoff_len: int = 256,
     val_set_size: int = 2000,
     warmup_steps: int = 0,
+    gradient_checkpointing: bool = False,  # trade compute for activation memory; no effect on final metrics
     # optimizer params
     optimizer: str = 'adamw_torch',  # options: adamw_torch|lorapre
     lorapre_rank: int = 8,  # rank of LoRA-Pre's momentum factorisation; must be < lora_r to have any effect
@@ -297,6 +298,7 @@ def train(
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
             fp16=fp16,
+            gradient_checkpointing=gradient_checkpointing,
             logging_steps=5,
             # only consulted when optimizer != 'lorapre'; LoRAPruneTrainer.create_optimizer
             # builds LoRA-Pre itself and ignores this field.
