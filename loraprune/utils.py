@@ -535,11 +535,13 @@ def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
 
             if not hasattr(module, 'lora_mask'):
                 continue
-
+            
+            # if the module is already pruned to the target ratio, skip it
             if (1 - module.lora_mask.mean()).item() >= target_ratio:
                 continue
 
             total_num = module.lora_mask.numel()
+            # this masks have (out_features,) shape for attn
             c_mask = module.lora_mask.data
             mask = torch.ones_like(c_mask)
 
@@ -591,7 +593,10 @@ def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
                 can_prune = torch.argsort(importance)[:need_prune_num]
                 mask[can_prune] = 0
 
+            
             if is_attn:
+                # mask has one 0/1 entry per head. lora_mask needs one entry per output row,
+                # so copy each head's value across all of its head_dim rows
                 mask = (mask.new_ones(module.lora_mask.shape).reshape(-1, head_dim) * mask.unsqueeze(1)).reshape(-1)
             module.lora_mask.data = mask
         else:
@@ -609,6 +614,9 @@ def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
                 continue
             q_mask = q_proj.lora_mask.data.reshape(-1, head_dim)[:, 0]            # (num_q_heads,)
             kv_mask = q_mask.reshape(-1, num_q_per_kv).any(dim=1).float()       # (num_kv_heads, num_q_per_kv) → any → (num_kv_heads,)
+            # same expansion as for q_proj: repeat each KV head's 0/1 head_dim times so k_proj/v_proj
+            # masks have one entry per output row.
+            # e.g. 2 KV heads, head_dim=3: kv_mask [1, 0] -> [1, 1, 1, 0, 0, 0]
             kv_mask_full = kv_mask.repeat_interleave(head_dim)
             layer.self_attn.k_proj.lora_mask.data = kv_mask_full
             # v_proj gets its own tensor instead of sharing memory with k_proj.lora_mask
