@@ -514,6 +514,10 @@ def prune(model, granular_gqa=False):
 
 
 def local_prune(model, s_dict, ratio, target_ratio, granular_gqa=False):
+    """ 
+    Make a pruning decision based on the provided sensitivity dict, target ratio, and current pruning ratio.
+    Updates the lora masks.
+    """
     original_param_num = 0
     pruned_param_num = 0
     _is_gqa = is_gqa_model(model)
